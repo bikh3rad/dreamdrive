@@ -1,0 +1,207 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import {
+  api, faNum, money, timeLeft, ApiError,
+  type Competition,
+} from "@/lib/api";
+import { FALLBACK_COMPETITIONS } from "@/lib/fallback";
+import { SpotBoard, type Marker } from "@/components/SpotBoard";
+import { useAuth } from "@/components/AuthProvider";
+import { useCart } from "@/components/CartProvider";
+import { IconGift, IconInfo, IconShield, IconTicket } from "@/components/icons";
+
+export default function PlayPage({ params }: { params: { slug: string } }) {
+  const router = useRouter();
+  const { user } = useAuth();
+  const { add, picks } = useCart();
+
+  const [comp, setComp] = useState<Competition | null>(null);
+  const [marks, setMarks] = useState<Marker[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  useEffect(() => {
+    api.competition(params.slug)
+      .then(setComp)
+      .catch(() => setComp(FALLBACK_COMPETITIONS.find((c) => c.slug === params.slug) || FALLBACK_COMPETITIONS[0]));
+  }, [params.slug]);
+
+  const total = useMemo(
+    () => (comp ? marks.length * comp.ticket_price_cents : 0),
+    [marks.length, comp],
+  );
+
+  if (!comp) {
+    return <div className="mx-auto max-w-7xl px-4 py-24 text-center text-ink-muted">در حال بارگذاری…</div>;
+  }
+
+  const closed = comp.status !== "open";
+
+  const addToCart = () => {
+    if (!user) return router.push(`/login?next=/play/${comp.slug}`);
+    marks.forEach((m) =>
+      add({
+        competitionSlug: comp.slug,
+        competitionTitle: comp.prize?.title || comp.title,
+        x: m.x, y: m.y,
+        priceCents: comp.ticket_price_cents,
+        currency: comp.currency,
+      }),
+    );
+    setMarks([]);
+    router.push("/cart");
+  };
+
+  const freeEntry = async () => {
+    if (!user) return router.push(`/login?next=/play/${comp.slug}`);
+    if (marks.length !== 1) {
+      return setMsg({ kind: "err", text: "برای ورود رایگان دقیقاً یک نقطه انتخاب کن." });
+    }
+    setBusy(true); setMsg(null);
+    try {
+      await api.freeEntry(comp.slug, marks[0].x, marks[0].y);
+      setMarks([]);
+      setMsg({ kind: "ok", text: "ورود رایگان ثبت شد. نتیجه پس از رأی داوران اعلام می‌شود." });
+    } catch (e) {
+      setMsg({ kind: "err", text: e instanceof ApiError ? e.message : "ثبت ناموفق بود." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
+      <nav className="mb-6 text-xs text-ink-muted">
+        <Link href="/" className="hover:text-ink">خانه</Link>
+        <span className="mx-2">/</span>
+        <Link href="/competitions" className="hover:text-ink">مسابقه‌ها</Link>
+        <span className="mx-2">/</span>
+        <span className="text-ink">{comp.prize?.title || comp.title}</span>
+      </nav>
+
+      <div className="grid gap-8 lg:grid-cols-[1fr_360px]">
+        {/* ---- تخته ---- */}
+        <div>
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-black text-ink sm:text-3xl">
+                {comp.prize?.title || comp.title}
+              </h1>
+              <p className="mt-1 text-sm text-ink-muted">{comp.prize?.subtitle}</p>
+            </div>
+            <span className={`chip ${closed ? "bg-ink text-white" : "bg-brand-100 text-brand-700"}`}>
+              {closed ? "بسته شده" : `${timeLeft(comp.closes_at)} تا پایان`}
+            </span>
+          </div>
+
+          <SpotBoard
+            image={comp.board_image}
+            markers={marks}
+            onAdd={(m) => setMarks((p) => [...p, m])}
+            onRemove={(i) => setMarks((p) => p.filter((_, j) => j !== i))}
+            readOnly={closed}
+          />
+
+          {closed && (
+            <div className="card mt-5 flex items-center gap-3 bg-canvas-alt p-5 text-sm text-ink-soft">
+              <IconInfo className="h-5 w-5 shrink-0 text-ink-muted" />
+              این مسابقه بسته شده است.{" "}
+              <Link href={`/competitions/${comp.slug}`} className="font-bold text-brand-600 hover:underline">
+                مشاهدهٔ نتیجه و رأی داوران
+              </Link>
+            </div>
+          )}
+        </div>
+
+        {/* ---- کنارهٔ خرید ---- */}
+        <aside className="space-y-5 lg:sticky lg:top-24 lg:self-start">
+          <div className="card p-6">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-ink-muted">هر پیشنهاد</span>
+              <span className="ltr-nums text-xl font-black text-ink">
+                {money(comp.ticket_price_cents, comp.currency)}
+              </span>
+            </div>
+
+            <div className="my-5 h-px bg-ink/[.07]" />
+
+            <div className="flex items-center justify-between text-sm">
+              <span className="flex items-center gap-2 text-ink-soft">
+                <IconTicket className="h-4 w-4" />
+                نقطه‌های انتخاب‌شده
+              </span>
+              <span className="ltr-nums font-black">{faNum(marks.length)}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-sm">
+              <span className="text-ink-soft">مجموع</span>
+              <span className="ltr-nums font-black text-brand-600">
+                {money(total, comp.currency)}
+              </span>
+            </div>
+
+            <button
+              onClick={addToCart}
+              disabled={closed || marks.length === 0 || busy}
+              className="btn-primary mt-5 w-full"
+            >
+              افزودن به سبد
+            </button>
+
+            <button
+              onClick={freeEntry}
+              disabled={closed || busy}
+              className="btn-ghost mt-2 w-full !py-2.5 text-sm"
+            >
+              <IconGift className="h-4 w-4" />
+              ورود رایگان (یک نقطه)
+            </button>
+
+            {msg && (
+              <p className={`mt-3 rounded-xl px-3 py-2 text-xs leading-6 ${
+                msg.kind === "ok" ? "bg-brand-50 text-brand-700" : "bg-red-50 text-red-700"
+              }`}>
+                {msg.text}
+              </p>
+            )}
+
+            {picks.length > 0 && (
+              <p className="mt-3 text-center text-xs text-ink-muted">
+                <span className="ltr-nums font-bold">{faNum(picks.length)}</span> پیشنهاد در سبد ·{" "}
+                <Link href="/cart" className="font-bold text-brand-600 hover:underline">مشاهدهٔ سبد</Link>
+              </p>
+            )}
+          </div>
+
+          <div className="card p-6">
+            <h3 className="flex items-center gap-2 text-sm font-black text-ink">
+              <IconShield className="h-4 w-4 text-brand-600" />
+              نقطه از قبل قفل شده است
+            </h3>
+            <p className="mt-2 text-xs leading-7 text-ink-muted">
+              هیئت داوران پیش از بسته‌شدن این مسابقه، هش نقطهٔ خود را ثبت کرده‌اند.
+              نه ما و نه هیچ کارمندی نمی‌تواند پاسخ را ببیند یا تغییر دهد. پس از
+              بسته‌شدن، نقطه و مقدار تصادفی آن منتشر می‌شود و هرکس می‌تواند هش را
+              خودش بررسی کند.
+            </p>
+            <Link href="/how-it-works#fairness" className="mt-3 inline-block text-xs font-bold text-brand-600 hover:underline">
+              روش بررسی
+            </Link>
+          </div>
+
+          <div className="card p-6">
+            <h3 className="text-sm font-black text-ink">قوانین کوتاه</h3>
+            <ul className="mt-3 space-y-2 text-xs leading-6 text-ink-muted">
+              <li>حداکثر <span className="ltr-nums font-bold">{faNum(comp.max_entries_user)}</span> پیشنهاد برای هر کاربر</li>
+              <li>یک ورود رایگان برای هر کاربر در هر مسابقه</li>
+              <li>در صورت تساوی، پیشنهادی که زودتر ثبت شده برنده است</li>
+              <li>کارکنان و پیمانکاران مجاز به شرکت نیستند</li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,86 @@
+// Command server نقطهٔ ورود API.
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"dreamdrive/api/internal/api"
+	"dreamdrive/api/internal/auth"
+	"dreamdrive/api/internal/config"
+	"dreamdrive/api/internal/store"
+)
+
+func main() {
+	cfg := config.Load()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	st, err := store.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	defer st.Close()
+
+	if err := st.Migrate(ctx); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+	log.Println("migrations applied")
+
+	srv := api.New(st, auth.NewManager(cfg.JWTSecret), cfg.WebhookSecret)
+	if cfg.WebhookSecret == "" {
+		log.Println("warning: PAYMENT_WEBHOOK_SECRET is unset — the payment webhook is disabled")
+	}
+
+	httpSrv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           srv.Router(cfg.CORSOrigin),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	// بستن خودکار مسابقاتی که مهلتشان تمام شده
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				n, err := st.CloseExpired(context.Background())
+				if err != nil {
+					log.Printf("close expired: %v", err)
+				} else if n > 0 {
+					log.Printf("closed %d expired competition(s)", n)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+
+	go func() {
+		log.Printf("api listening on :%s", cfg.Port)
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen: %v", err)
+		}
+	}()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+	close(stop)
+
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutCancel()
+	if err := httpSrv.Shutdown(shutCtx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+	log.Println("stopped")
+}

@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-canvas text-ink antialiased;
+  }
+  /* اعداد لاتین در متن فارسی همیشه چپ‌به‌راست بمانند */
+  .ltr-nums {
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3
+           text-sm font-bold transition-all duration-150 disabled:opacity-50
+           disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 text-ink hover:bg-brand-400 active:scale-[.98]
+           shadow-[0_2px_8px_rgba(240,168,40,.35)];
+  }
+  .btn-dark {
+    @apply btn bg-ink text-white hover:bg-ink-soft active:scale-[.98];
+  }
+  .btn-ghost {
+    @apply btn border border-ink/10 bg-white text-ink hover:border-ink/25 hover:bg-canvas-alt;
+  }
+  .card {
+    @apply rounded-card border border-ink/[.07] bg-white shadow-card;
+  }
+  .eyebrow {
+    @apply text-sm font-bold tracking-wide text-brand-600;
+  }
+  .h-section {
+    @apply text-3xl font-black leading-tight text-ink sm:text-4xl md:text-[2.75rem];
+  }
+  .muted {
+    @apply text-ink-muted;
+  }
+  .field {
+    @apply w-full rounded-xl border border-ink/15 bg-white px-4 py-3 text-sm
+           outline-none transition focus:border-brand-500
+           focus:ring-4 focus:ring-brand-500/15;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-bold text-ink;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold;
+  }
+}

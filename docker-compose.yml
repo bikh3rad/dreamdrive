@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dreamdrive
+      POSTGRES_PASSWORD: dreamdrive
+      POSTGRES_DB: dreamdrive
+    ports:
+      - "5432:5432"
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dreamdrive -d dreamdrive"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://dreamdrive:dreamdrive@db:5432/dreamdrive?sslmode=disable
+      # در محیط عملیاتی این مقدار را حتماً عوض کن — APP_ENV=production آن را الزامی می‌کند
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      CORS_ORIGIN: http://localhost:3000
+      APP_ENV: development
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # یک‌بار اجرا می‌شود و دادهٔ نمونه را می‌سازد: docker compose run --rm seed
+  seed:
+    build: ./api
+    command: ["seed"]
+    environment:
+      DATABASE_URL: postgres://dreamdrive:dreamdrive@db:5432/dreamdrive?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles: ["tools"]
+
+  web:
+    build: ./web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  dbdata:

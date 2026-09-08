@@ -1,0 +1,9 @@
+.env
+.env.local
+node_modules/
+.next/
+out/
+/api/server
+/api/seed
+*.log
+.DS_Store
