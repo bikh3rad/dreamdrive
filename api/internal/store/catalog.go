@@ -117,8 +117,17 @@ func (s *Store) DeletePrizeMedia(ctx context.Context, id uuid.UUID) error {
 
 // ---------- Competitions ----------
 
+// دو نسخه لازم است و ترتیب ستون‌ها در هر دو باید با scanComp یکی بماند.
+//
+// compCols با پیشوند «c.» فقط جایی کار می‌کند که نام مستعار c تعریف شده
+// باشد، یعنی در SELECT … FROM competitions c. در INSERT/UPDATE … RETURNING
+// چنین نام مستعاری وجود ندارد و Postgres خطای 42P01 می‌دهد.
 const compCols = `c.id, c.slug, c.prize_id, c.title, c.ticket_price_cents, c.currency,
 	c.board_image, c.opens_at, c.closes_at, c.status, c.max_entries_user, c.created_at`
+
+// compColsBare برای RETURNING در INSERT و UPDATE.
+const compColsBare = `id, slug, prize_id, title, ticket_price_cents, currency,
+	board_image, opens_at, closes_at, status, max_entries_user, created_at`
 
 func scanComp(row interface{ Scan(...any) error }) (Competition, error) {
 	var c Competition
@@ -202,7 +211,7 @@ func (s *Store) CreateCompetition(ctx context.Context, in CompetitionInput) (Com
 	row := s.DB.QueryRow(ctx,
 		`INSERT INTO competitions (slug, prize_id, title, ticket_price_cents, currency,
 		     board_image, opens_at, closes_at, status, max_entries_user)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+compCols,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+compColsBare,
 		in.Slug, in.PrizeID, in.Title, in.TicketPriceCents, in.Currency, in.BoardImage,
 		in.OpensAt, in.ClosesAt, in.Status, in.MaxEntriesUser)
 	c, err := scanComp(row)
@@ -213,7 +222,7 @@ func (s *Store) UpdateCompetition(ctx context.Context, id uuid.UUID, in Competit
 	row := s.DB.QueryRow(ctx,
 		`UPDATE competitions SET slug=$2, prize_id=$3, title=$4, ticket_price_cents=$5,
 		     currency=$6, board_image=$7, opens_at=$8, closes_at=$9, status=$10, max_entries_user=$11
-		 WHERE id=$1 RETURNING `+compCols,
+		 WHERE id=$1 RETURNING `+compColsBare,
 		id, in.Slug, in.PrizeID, in.Title, in.TicketPriceCents, in.Currency, in.BoardImage,
 		in.OpensAt, in.ClosesAt, in.Status, in.MaxEntriesUser)
 	c, err := scanComp(row)

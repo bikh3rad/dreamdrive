@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { PageHead } from "@/components/admin/ui";
 import { Logo } from "@/components/icons";
+import { ImagePicker } from "@/components/admin/ImagePicker";
 
 type S = Record<string, any>;
 
@@ -124,8 +125,12 @@ export default function SettingsPage() {
                 </div>
               ))}
               <div className="sm:col-span-2">
-                <label className="label">تصویر بنر صفحهٔ اصلی</label>
-                <input className="field text-start" dir="ltr" value={s.hero_image} onChange={(e) => set("hero_image", e.target.value)} />
+                <ImagePicker
+                  label="تصویر بنر صفحهٔ اصلی"
+                  folder="brand"
+                  value={s.hero_image}
+                  onChange={(url) => set("hero_image", url)}
+                />
               </div>
             </div>
           )}

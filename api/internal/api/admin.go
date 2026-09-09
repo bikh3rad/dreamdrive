@@ -87,9 +87,15 @@ func (s *Server) adminUpdatePrize(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 400, "invalid request body")
 		return
 	}
+	if in.Slug == "" || in.Title == "" {
+		httpx.Fail(w, 400, "slug and title are required")
+		return
+	}
 	p, err := s.St.UpdatePrize(r.Context(), id, in)
 	if err != nil {
-		httpx.Fail(w, 400, "could not update prize")
+		// متن خطای پایگاه داده برگردانده می‌شود چون بیشتر شکست‌ها قابل رفع
+		// توسط خود ادمین‌اند: slug تکراری یا kind خارج از فهرست مجاز.
+		httpx.Fail(w, 400, "could not update prize: "+err.Error())
 		return
 	}
 	s.audit(r, "prize.update", p.Slug, nil)

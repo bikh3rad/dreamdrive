@@ -3,9 +3,22 @@
 import { useEffect, useState } from "react";
 import { api, money, ApiError, type Prize } from "@/lib/api";
 import { PageHead, Table, Empty, Modal } from "@/components/admin/ui";
+import { ImagePicker } from "@/components/admin/ImagePicker";
+
+/**
+ * این مقادیر باید دقیقاً با CHECK جدول prizes در مهاجرت ۰۰۰۱ یکی باشند،
+ * وگرنه Postgres رکورد را رد می‌کند و ذخیره با خطای ۴۰۰ شکست می‌خورد.
+ */
+const KINDS: { value: string; label: string }[] = [
+  { value: "bundle", label: "ویلا + خودرو" },
+  { value: "car", label: "فقط خودرو" },
+  { value: "villa", label: "فقط اقامت" },
+  { value: "lifestyle", label: "سبک زندگی" },
+  { value: "cash", label: "جایزهٔ نقدی" },
+];
 
 const BLANK: Partial<Prize> = {
-  slug: "", title: "", kind: "villa_car", subtitle: "", body_md: "",
+  slug: "", title: "", kind: "bundle", subtitle: "", body_md: "",
   value_cents: 0, hero_image: "",
 };
 
@@ -17,7 +30,7 @@ function payload(p: Partial<Prize>) {
   return {
     slug: p.slug || "",
     title: p.title || "",
-    kind: p.kind || "villa_car",
+    kind: p.kind || "bundle",
     subtitle: p.subtitle || "",
     body_md: p.body_md || "",
     spec: p.spec || {},
@@ -105,11 +118,10 @@ export default function PrizesPage() {
             </div>
             <div>
               <label className="label">نوع</label>
-              <select className="field" value={edit.kind} onChange={set("kind")}>
-                <option value="villa_car">ویلا + خودرو</option>
-                <option value="car">فقط خودرو</option>
-                <option value="villa">فقط اقامت</option>
-                <option value="cash">جایزهٔ نقدی</option>
+              <select className="field" value={edit.kind || "bundle"} onChange={set("kind")}>
+                {KINDS.map((k) => (
+                  <option key={k.value} value={k.value}>{k.label}</option>
+                ))}
               </select>
             </div>
             <div className="sm:col-span-2">
@@ -124,20 +136,19 @@ export default function PrizesPage() {
                 onChange={set("value_cents")}
               />
             </div>
-            <div>
-              <label className="label">نشانی تصویر شاخص</label>
-              <input className="field text-start" dir="ltr" value={edit.hero_image || ""} onChange={set("hero_image")} />
+            <div className="sm:col-span-2">
+              <ImagePicker
+                label="تصویر شاخص"
+                folder="prizes"
+                value={edit.hero_image || ""}
+                onChange={(url) => setEdit({ ...edit, hero_image: url })}
+              />
             </div>
             <div className="sm:col-span-2">
               <label className="label">توضیح کامل (مارک‌داون)</label>
               <textarea className="field min-h-[9rem]" value={edit.body_md || ""} onChange={set("body_md")} />
             </div>
           </div>
-
-          {edit.hero_image && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={edit.hero_image} alt="" className="mt-4 aspect-[16/7] w-full rounded-xl object-cover" />
-          )}
 
           {err && <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{err}</p>}
 

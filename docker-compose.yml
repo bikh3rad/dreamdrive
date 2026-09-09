@@ -15,6 +15,38 @@ services:
       timeout: 3s
       retries: 20
 
+  # انبارهٔ فایل سازگار با S3 برای تصاویر آپلودی.
+  # کنسول مدیریتش روی http://localhost:9001 است (minioadmin / minioadmin).
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # سطل را می‌سازد و خواندنش را عمومی می‌کند، بعد خارج می‌شود.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set dd http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin} &&
+      mc mb --ignore-existing dd/${S3_BUCKET:-dreamdrive} &&
+      mc anonymous set download dd/${S3_BUCKET:-dreamdrive}
+      "
+
   api:
     build: ./api
     environment:
@@ -25,11 +57,30 @@ services:
       CORS_ORIGIN: http://localhost:3000
       APP_ENV: development
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
+
+      # انبارهٔ فایل. برای برگشتن به دیسک محلی: STORAGE_DRIVER=local
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
+      PUBLIC_URL: http://localhost:8080
+      UPLOAD_DIR: /data/uploads
+      # نشانی داخلی شبکهٔ داکر برای نوشتن…
+      S3_ENDPOINT: http://minio:9000
+      # …و نشانی مرورگری برای خواندن. این دو عمداً فرق دارند، چون مرورگرِ
+      # کاربر نام «minio» را نمی‌شناسد.
+      S3_PUBLIC_BASE: http://localhost:9000/${S3_BUCKET:-dreamdrive}
+      S3_BUCKET: ${S3_BUCKET:-dreamdrive}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_PATH_STYLE: "true"
+    volumes:
+      - uploads:/data/uploads
     ports:
       - "8080:8080"
     depends_on:
       db:
         condition: service_healthy
+      # منتظر ساخته شدن سطل می‌ماند، وگرنه نخستین آپلودها ۵۰۲ می‌گیرند.
+      minio-init:
+        condition: service_completed_successfully
 
   # یک‌بار اجرا می‌شود و دادهٔ نمونه را می‌سازد: docker compose run --rm seed
   seed:
@@ -53,3 +104,5 @@ services:
 
 volumes:
   dbdata:
+  miniodata:
+  uploads:

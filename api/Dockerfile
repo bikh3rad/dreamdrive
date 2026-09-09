@@ -15,6 +15,9 @@ FROM alpine:3.20
 RUN adduser -D -u 10001 app
 COPY --from=build /out/server /usr/local/bin/server
 COPY --from=build /out/seed   /usr/local/bin/seed
+# پوشهٔ آپلود در حالت STORAGE_DRIVER=local. مالکیتش را همین‌جا می‌دهیم،
+# وگرنه volume داکر با مالک root ساخته می‌شود و کاربر app نمی‌تواند بنویسد.
+RUN mkdir -p /data/uploads && chown -R app /data
 USER app
 EXPOSE 8080
 CMD ["server"]

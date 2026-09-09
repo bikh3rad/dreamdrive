@@ -5,6 +5,7 @@ import { api, faNum, money, ApiError, type Competition, type Prize } from "@/lib
 import {
   PageHead, Table, Empty, Modal, Badge, statusLabel, statusTone,
 } from "@/components/admin/ui";
+import { ImagePicker } from "@/components/admin/ImagePicker";
 
 const FLOW: Record<string, { next: string; label: string }[]> = {
   draft: [{ next: "open", label: "باز کردن" }, { next: "cancelled", label: "لغو" }],
@@ -170,16 +171,16 @@ export default function AdminCompetitionsPage() {
               <label className="label">سقف پیشنهاد هر کاربر</label>
               <input className="field text-start" dir="ltr" type="number" value={edit.max_entries_user} onChange={set("max_entries_user")} />
             </div>
-            <div>
-              <label className="label">تصویر تخته (بدون توپ)</label>
-              <input className="field text-start" dir="ltr" value={edit.board_image} onChange={set("board_image")} />
+            <div className="sm:col-span-2">
+              <ImagePicker
+                label="تصویر تخته (بدون توپ)"
+                folder="boards"
+                aspect="aspect-[3/2]"
+                value={edit.board_image}
+                onChange={(url) => setEdit({ ...edit, board_image: url })}
+              />
             </div>
           </div>
-
-          {edit.board_image && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={edit.board_image} alt="" className="mt-4 aspect-[3/2] w-full rounded-xl object-cover" />
-          )}
 
           <p className="mt-4 rounded-xl bg-canvas-alt p-3 text-xs leading-6 text-ink-muted">
             تصویر تخته باید همان قابی باشد که توپ از آن حذف شده است. پس از باز

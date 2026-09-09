@@ -14,8 +14,29 @@ import (
 	"dreamdrive/api/internal/api"
 	"dreamdrive/api/internal/auth"
 	"dreamdrive/api/internal/config"
+	"dreamdrive/api/internal/storage"
 	"dreamdrive/api/internal/store"
 )
+
+// buildStorage انبارهٔ فایل را طبق پیکربندی می‌سازد.
+func buildStorage(cfg config.Config) (storage.Store, error) {
+	if cfg.StorageDriver == "s3" {
+		log.Printf("storage: s3 bucket %q at %s", cfg.S3Bucket, cfg.S3Endpoint)
+		return &storage.S3{
+			Endpoint:   cfg.S3Endpoint,
+			Region:     cfg.S3Region,
+			Bucket:     cfg.S3Bucket,
+			AccessKey:  cfg.S3AccessKey,
+			SecretKey:  cfg.S3SecretKey,
+			PublicBase: cfg.S3PublicBase,
+			PathStyle:  cfg.S3PathStyle,
+		}, nil
+	}
+	// حالت پیش‌فرض: دیسک محلی. برای چند نمونهٔ همزمانِ API مناسب نیست،
+	// چون هر نمونه فقط فایل‌های خودش را دارد؛ در آن حالت به s3 سوییچ کن.
+	log.Printf("storage: local directory %s served at /uploads/", cfg.UploadDir)
+	return storage.NewLocal(cfg.UploadDir, cfg.PublicURL)
+}
 
 func main() {
 	cfg := config.Load()
@@ -34,7 +55,12 @@ func main() {
 	}
 	log.Println("migrations applied")
 
-	srv := api.New(st, auth.NewManager(cfg.JWTSecret), cfg.WebhookSecret)
+	files, err := buildStorage(cfg)
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+
+	srv := api.New(st, auth.NewManager(cfg.JWTSecret), cfg.WebhookSecret, files)
 	if cfg.WebhookSecret == "" {
 		log.Println("warning: PAYMENT_WEBHOOK_SECRET is unset — the payment webhook is disabled")
 	}

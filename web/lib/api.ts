@@ -173,6 +173,46 @@ async function request<T>(
   return body as T;
 }
 
+/**
+ * آپلود فایل مسیر جدایی دارد چون request() سرآیند JSON را ثابت می‌گذارد.
+ * برای multipart باید Content-Type را اصلاً ننویسیم تا مرورگر خودش
+ * boundary را اضافه کند؛ در غیر این صورت سرور فرم را نمی‌تواند بخواند.
+ */
+async function upload(
+  path: string,
+  file: File,
+  fields: Record<string, string> = {},
+): Promise<UploadResult> {
+  const fd = new FormData();
+  fd.append("file", file);
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", headers, body: fd });
+  const text = await res.text();
+  // پاسخ خطای پروکسی یا سقف حجم ممکن است JSON نباشد
+  let body: any = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { error: text.slice(0, 200) };
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, body.error || `upload failed (${res.status})`);
+  }
+  return body as UploadResult;
+}
+
+export interface UploadResult {
+  url: string;
+  key: string;
+  bytes: number;
+  type: string;
+}
+
 export const api = {
   // احراز هویت
   register: (b: { email: string; password: string; full_name: string; country: string }) =>
@@ -233,6 +273,8 @@ export const api = {
   // ادمین
   admin: {
     stats: () => request<Stats>("/api/admin/stats"),
+    upload: (file: File, folder = "prizes") =>
+      upload("/api/admin/uploads", file, { folder }),
     audit: (limit = 100) => request<{ entries: any[] }>(`/api/admin/audit?limit=${limit}`),
 
     prizes: () => request<{ prizes: Prize[] }>("/api/admin/prizes"),

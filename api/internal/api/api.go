@@ -11,6 +11,7 @@ import (
 
 	"dreamdrive/api/internal/auth"
 	"dreamdrive/api/internal/httpx"
+	"dreamdrive/api/internal/storage"
 	"dreamdrive/api/internal/store"
 )
 
@@ -20,10 +21,12 @@ type Server struct {
 	// کلید مشترک با درگاه پرداخت برای بررسی امضای وب‌هوک.
 	// خالی یعنی وب‌هوک پیکربندی نشده و مسیر ۵۰۳ برمی‌گرداند.
 	WebhookSecret string
+	// انبارهٔ فایل‌های آپلودی. nil یعنی آپلود غیرفعال است.
+	Files storage.Store
 }
 
-func New(st *store.Store, am *auth.Manager, webhookSecret string) *Server {
-	return &Server{St: st, Auth: am, WebhookSecret: webhookSecret}
+func New(st *store.Store, am *auth.Manager, webhookSecret string, files storage.Store) *Server {
+	return &Server{St: st, Auth: am, WebhookSecret: webhookSecret, Files: files}
 }
 
 func (s *Server) Router(corsOrigin string) http.Handler {
@@ -41,6 +44,14 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 200, map[string]string{"status": "ok"})
 	})
+
+	// انبارهٔ محلی فایل‌ها را خودش سرو می‌کند؛ در حالت S3 این بخش خالی است
+	// چون خواندن مستقیماً از انباره یا CDN انجام می‌شود.
+	if s.Files != nil {
+		if prefix, h := s.Files.Handler(); h != nil {
+			r.Handle(prefix+"*", h)
+		}
+	}
 
 	r.Route("/api", func(r chi.Router) {
 		// ---- عمومی ----
@@ -100,6 +111,8 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Put("/competitions/{id}", s.adminUpdateCompetition)
 				r.Post("/competitions/{id}/status", s.adminSetStatus)
 				r.Delete("/competitions/{id}", s.adminDeleteCompetition)
+
+				r.Post("/uploads", s.uploadImage)
 
 				r.Get("/pages", s.adminListPages)
 				r.Put("/pages", s.adminUpsertPage)
