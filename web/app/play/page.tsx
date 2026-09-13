@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { FALLBACK_COMPETITIONS } from "@/lib/fallback";
 
 /** «بازی» بدون اسلاگ → اولین مسابقهٔ باز */
 export default function PlayIndex() {
@@ -15,7 +14,9 @@ export default function PlayIndex() {
         const open = r.competitions?.find((c) => c.status === "open");
         router.replace(open ? `/play/${open.slug}` : "/competitions");
       })
-      .catch(() => router.replace(`/play/${FALLBACK_COMPETITIONS[0].slug}`));
+      // فرستادن کاربر به slug نمونه یعنی صفحهٔ بازیِ جعلی؛ بهتر است به
+      // فهرست مسابقه‌ها برود که خودش خطا را درست نشان می‌دهد.
+      .catch(() => router.replace("/competitions"));
   }, [router]);
 
   return (

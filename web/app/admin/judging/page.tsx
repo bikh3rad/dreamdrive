@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, faNum, ApiError, type Competition, type Entry, type JudgeStatus } from "@/lib/api";
+import {
+  api, faNum, ApiError,
+  type Competition, type Entry, type JudgeStatus, type ChainCheck,
+} from "@/lib/api";
 import {
   PageHead, Table, Empty, Badge, statusLabel, statusTone,
 } from "@/components/admin/ui";
@@ -13,7 +16,7 @@ export default function JudgingPage() {
   const [sel, setSel] = useState<Competition | null>(null);
   const [panel, setPanel] = useState<JudgeStatus[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [verify, setVerify] = useState<{ checked: number; intact: boolean; first_bad_seq: number } | null>(null);
+  const [verify, setVerify] = useState<ChainCheck | null>(null);
   const [sealed, setSealed] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -115,9 +118,13 @@ export default function JudgingPage() {
               </div>
 
               <div className="mt-4 divide-y divide-ink/[.05]">
+                {/* پنل برای هر کاربرِ دارای نقش داور یک ردیف دارد، چه تعهد
+                    داده باشد چه نه. پس فهرست خالی یعنی اصلاً حساب داوری
+                    ساخته نشده — نه اینکه داوران هنوز رأی نداده‌اند. */}
                 {panel.length === 0 && (
                   <p className="py-6 text-center text-xs text-ink-muted">
-                    هنوز داوری برای این مسابقه ثبت نکرده است.
+                    هیچ حساب کاربری با نقش «داور» وجود ندارد. از «مدیریت کاربران»
+                    نقش داوران را تنظیم کن.
                   </p>
                 )}
                 {panel.map((j) => (
@@ -171,14 +178,22 @@ export default function JudgingPage() {
                     <>
                       زنجیره شکسته است. اولین رکورد مشکوک:{" "}
                       <span className="ltr-nums font-bold">#{faNum(verify.first_bad_seq)}</span>.
-                      تسویه را متوقف کن و موضوع را به داور مستقل گزارش بده.
+                      یک حادثهٔ یکپارچگی به‌طور خودکار ثبت شد
+                      {verify.incident_id ? (
+                        <> (شمارهٔ <span className="ltr-nums font-bold">{faNum(verify.incident_id)}</span>)</>
+                      ) : null}
+                      {" "}و تسویهٔ این مسابقه قفل شده است. این رکورد از پنل
+                      مدیریت قابل حذف یا ویرایش نیست؛ تنها ناظر مستقل می‌تواند
+                      پس از رسیدگی قفل را باز کند.
                     </>
                   )}
                 </div>
               ) : (
                 <p className="mt-4 text-xs leading-6 text-ink-muted">
                   هر پیشنهاد با هش پیشنهاد قبلی امضا شده است. این بررسی تشخیص
-                  می‌دهد آیا رکوردی پس از ثبت تغییر کرده یا حذف شده است.
+                  می‌دهد آیا رکوردی پس از ثبت تغییر کرده یا حذف شده است. همین
+                  بررسی هنگام تسویه هم به‌اجبار اجرا می‌شود، پس فراموش کردنش
+                  خطری ایجاد نمی‌کند.
                 </p>
               )}
             </section>

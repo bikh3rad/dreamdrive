@@ -37,6 +37,8 @@ func main() {
 		{"judge1@panel.example", "Referee A. Moretti", "IT", auth.RoleJudge},
 		{"judge2@panel.example", "Referee L. Bergström", "SE", auth.RoleJudge},
 		{"judge3@panel.example", "Referee D. Okafor", "IE", auth.RoleJudge},
+		// حساب ناظر جداست و هیچ نقش مدیریتی ندارد؛ استقلالش همین است.
+		{"auditor@panel.example", "Auditor — C. Haldane", "IE", auth.RoleAuditor},
 		{"james@example.com", "James W.", "CA", auth.RoleUser},
 		{"priya@example.com", "Priya S.", "CA", auth.RoleUser},
 		{"marc@example.com", "Marc L.", "CA", auth.RoleUser},
@@ -53,6 +55,18 @@ func main() {
 			u, err = st.UserByEmail(ctx, p.email)
 			if err != nil {
 				log.Fatalf("user %s: %v", p.email, err)
+			}
+		}
+		// داور، ناظر و هر نقش مدیریتی «داخلی» شمرده می‌شوند تا Checkout
+		// شرکتشان را رد کند. کسی که نقطهٔ درست را تعیین می‌کند یا بر تسویه
+		// نظارت دارد نباید بتواند در همان مسابقه شرکت کند.
+		if p.role != auth.RoleUser && !u.IsInsider {
+			insider := true
+			if nu, err := st.UpdateUserAdmin(ctx, u.ID,
+				store.UserPatch{IsInsider: &insider}); err == nil {
+				u = nu
+			} else {
+				log.Printf("insider flag %s: %v", p.email, err)
 			}
 		}
 		users[p.email] = u

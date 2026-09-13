@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { useAuth, isAdmin } from "./AuthProvider";
+import { useAuth, isAdmin, isJudge, isAuditor } from "./AuthProvider";
 import { useCart } from "./CartProvider";
 import { faNum } from "@/lib/api";
-import { Logo, IconTicket, IconGift, IconSettings, IconMenu } from "./icons";
+import { Logo, IconTicket, IconGift, IconSettings, IconMenu, IconScale, IconShield } from "./icons";
 
 const NAV = [
   { label: "خانه", href: "/" },
@@ -53,6 +53,24 @@ export function SiteHeader() {
               </Link>
             );
           })}
+          {isJudge(user) && (
+            <Link
+              href="/judge"
+              className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-bold text-brand-600 hover:bg-brand-50"
+            >
+              <IconScale className="h-4 w-4" />
+              کنسول داوری
+            </Link>
+          )}
+          {isAuditor(user) && (
+            <Link
+              href="/audit"
+              className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-bold text-brand-600 hover:bg-brand-50"
+            >
+              <IconShield className="h-4 w-4" />
+              نظارت مستقل
+            </Link>
+          )}
           {isAdmin(user) && (
             <Link
               href="/admin"
@@ -120,6 +138,18 @@ export function SiteHeader() {
               {n.label}
             </Link>
           ))}
+          {isJudge(user) && (
+            <Link href="/judge" onClick={() => setOpen(false)}
+              className="block rounded-lg px-3 py-2.5 text-sm font-bold text-brand-600">
+              کنسول داوری
+            </Link>
+          )}
+          {isAuditor(user) && (
+            <Link href="/audit" onClick={() => setOpen(false)}
+              className="block rounded-lg px-3 py-2.5 text-sm font-bold text-brand-600">
+              نظارت مستقل
+            </Link>
+          )}
           {isAdmin(user) && (
             <Link href="/admin" onClick={() => setOpen(false)}
               className="block rounded-lg px-3 py-2.5 text-sm font-bold text-brand-600">

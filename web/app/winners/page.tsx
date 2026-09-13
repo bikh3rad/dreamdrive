@@ -7,12 +7,14 @@ import { FALLBACK_WINNERS } from "@/lib/fallback";
 import { IconGlobe, IconTrophy } from "@/components/icons";
 
 export default function WinnersPage() {
-  const [winners, setWinners] = useState<Winner[]>(FALLBACK_WINNERS);
+  // null = هنوز پاسخی نیامده، [] = آمده و خالی بوده. دادهٔ نمونه فقط وقتی
+  // نشان داده می‌شود که API اصلاً در دسترس نباشد.
+  const [winners, setWinners] = useState<Winner[] | null>(null);
 
   useEffect(() => {
     api.winners()
-      .then((r) => { if (r.winners?.length) setWinners(r.winners); })
-      .catch(() => {});
+      .then((r) => setWinners(r.winners || []))
+      .catch(() => setWinners(FALLBACK_WINNERS));
   }, []);
 
   return (
@@ -24,8 +26,14 @@ export default function WinnersPage() {
         است. نقطه و مقدار تصادفی هر مسابقه پس از اعلام نتیجه منتشر می‌شود.
       </p>
 
+      {winners !== null && winners.length === 0 && (
+        <p className="mt-10 rounded-card border border-ink/10 bg-canvas-alt px-5 py-6 text-sm text-ink-muted">
+          هنوز مسابقه‌ای به نتیجه نرسیده است. پس از نخستین داوری، برندگان همین‌جا فهرست می‌شوند.
+        </p>
+      )}
+
       <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {winners.map((w) => (
+        {(winners || []).map((w) => (
           <article key={w.competition_slug} className="card overflow-hidden">
             <div className="aspect-[16/10] bg-canvas-alt">
               {/* eslint-disable-next-line @next/next/no-img-element */}

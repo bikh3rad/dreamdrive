@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,6 +49,8 @@ func (s *Store) prizeMedia(ctx context.Context, prizeID uuid.UUID) ([]PrizeMedia
 	rows, err := s.DB.Query(ctx,
 		`SELECT id, url, caption, sort FROM prize_media WHERE prize_id=$1 ORDER BY sort, id`, prizeID)
 	if err != nil {
+		slog.Error("prizeMedia", "error", err)
+
 		return nil, err
 	}
 	defer rows.Close()
@@ -215,6 +218,9 @@ func (s *Store) CreateCompetition(ctx context.Context, in CompetitionInput) (Com
 		in.Slug, in.PrizeID, in.Title, in.TicketPriceCents, in.Currency, in.BoardImage,
 		in.OpensAt, in.ClosesAt, in.Status, in.MaxEntriesUser)
 	c, err := scanComp(row)
+	if err != nil {
+		slog.Error("createCompetition", "error", err)
+	}
 	return c, norm(err)
 }
 

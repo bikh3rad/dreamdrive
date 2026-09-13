@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -230,7 +231,11 @@ func (s *Server) adminDeleteCompetition(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := s.St.DeleteCompetition(r.Context(), id); err != nil {
-		httpx.Fail(w, 409, "competition has entries and cannot be deleted")
+		// از مهاجرت 0002 به بعد، حادثهٔ یکپارچگی هم با ON DELETE RESTRICT
+		// مانع حذف می‌شود. پیام قبلی فقط «پیشنهاد دارد» می‌گفت و ادمین را
+		// در مورد علت واقعی گمراه می‌کرد.
+		httpx.Fail(w, 409,
+			"competition cannot be deleted: it still has entries or an integrity incident on record")
 		return
 	}
 	s.audit(r, "competition.delete", id.String(), nil)
@@ -355,6 +360,33 @@ func (s *Server) adminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 400, "you cannot demote your own account")
 		return
 	}
+
+	// ---- مرز ناظر مستقل ----
+	// بدون این بخش، کل نظارت مستقل نمایشی بود: مدیر کل می‌توانست یک حساب
+	// بسازد، نقشش را auditor کند، با آن وارد شود و حادثهٔ یکپارچگیِ خودش را
+	// ببندد. یعنی همان کسی که قفل برای مهار او گذاشته شده، کلید را می‌ساخت.
+	// پس نقش auditor از این مسیر نه داده می‌شود و نه گرفته؛ فقط با دسترسی
+	// مستقیم به پایگاه‌داده (که ردّ عملیاتی جداگانه دارد) قابل تغییر است.
+	if in.Role != nil && *in.Role == auth.RoleAuditor {
+		httpx.Fail(w, 403,
+			"the auditor role cannot be granted from the admin panel; it is assigned out of band so that the auditor is not appointed by the party being audited")
+		return
+	}
+	target, err := s.St.UserByID(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, 404, "user not found")
+		return
+	}
+	if target.Role == auth.RoleAuditor {
+		// تنزل نقش ناظر و مسدودکردنش هر دو همان اثر را دارند: حذف ناظر.
+		// اگر ادمین بتواند ناظر را از میدان بیرون کند، قفل تسویه بی‌معناست.
+		if in.Role != nil || (in.IsBlocked != nil && *in.IsBlocked) {
+			httpx.Fail(w, 403,
+				"an auditor account cannot be demoted or blocked from the admin panel")
+			return
+		}
+	}
+
 	u, err := s.St.UpdateUserAdmin(r.Context(), id, in)
 	if err != nil {
 		httpx.Fail(w, 400, "could not update user")
@@ -459,8 +491,26 @@ func (s *Server) adminVerifyChain(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 500, "verification failed")
 		return
 	}
+
+	// شکستن زنجیره باید رکورد پاک‌نشدنی بسازد، نه فقط پیامی روی صفحهٔ ادمین.
+	// تا پیش از این، تنها کسی که از حادثه باخبر می‌شد همان کسی بود که
+	// بیشترین انگیزه را برای پنهان کردنش دارد.
+	var incidentID int64
+	if badSeq != 0 {
+		incidentID, err = s.St.RecordIncident(r.Context(), id, "chain_broken",
+			"بررسی زنجیره از پنل مدیریت اجرا شد و رکورد معیوب یافت شد.",
+			badSeq, checked)
+		if err != nil {
+			httpx.Fail(w, 500, "could not record the integrity incident")
+			return
+		}
+		s.audit(r, "integrity.chain_broken", id.String(), map[string]any{
+			"first_bad_seq": badSeq, "checked": checked, "incident_id": incidentID})
+	}
+
 	httpx.JSON(w, 200, map[string]any{
 		"checked": checked, "intact": badSeq == 0, "first_bad_seq": badSeq,
+		"incident_id": incidentID,
 	})
 }
 
@@ -472,6 +522,12 @@ func (s *Server) adminSettle(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.St.Settle(r.Context(), id)
 	if err != nil {
+		// قفل یکپارچگی پیام اختصاصی دارد: ادمین باید بداند چرا نمی‌تواند
+		// ادامه دهد و اینکه خودش نمی‌تواند قفل را باز کند.
+		if errors.Is(err, store.ErrIncidentOpen) {
+			httpx.Fail(w, 409, "settlement is locked: an unresolved integrity incident is on record for this competition. only the independent auditor can clear it from /audit")
+			return
+		}
 		httpx.Fail(w, 409, err.Error())
 		return
 	}
@@ -504,8 +560,11 @@ func (s *Server) adminSetVideo(w http.ResponseWriter, r *http.Request) {
 // ---------- داور ----------
 
 func (s *Server) judgeCompetitions(w http.ResponseWriter, r *http.Request) {
+	// draft هم لازم است: Commit عمداً آن را می‌پذیرد تا داور بتواند پیش از
+	// عمومی‌شدن مسابقه نقطه‌اش را قفل کند. اگر اینجا نباشد، آن مسیر هرگز از
+	// رابط کاربری در دسترس نیست.
 	comps, err := s.St.ListCompetitions(r.Context(),
-		[]string{"open", "closed", "judging"}, true)
+		[]string{"draft", "open", "closed", "judging"}, true)
 	if err != nil {
 		httpx.Fail(w, 500, "could not load competitions")
 		return

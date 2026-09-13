@@ -12,16 +12,18 @@ const TABS = [
 ];
 
 export default function CompetitionsPage() {
-  const [comps, setComps] = useState<Competition[]>(FALLBACK_COMPETITIONS);
+  // null یعنی هنوز پاسخ نیامده؛ دادهٔ نمونه فقط جایگزین خطای شبکه می‌شود،
+  // نه جایگزین فهرست واقعیِ خالی.
+  const [comps, setComps] = useState<Competition[] | null>(null);
   const [tab, setTab] = useState("open");
 
   useEffect(() => {
     api.competitions(true)
-      .then((r) => { if (r.competitions?.length) setComps(r.competitions); })
-      .catch(() => {});
+      .then((r) => setComps(r.competitions || []))
+      .catch(() => setComps(FALLBACK_COMPETITIONS));
   }, []);
 
-  const shown = comps.filter((c) =>
+  const shown = (comps || []).filter((c) =>
     tab === "all" ? true : tab === "open" ? c.status === "open" : c.status !== "open",
   );
 
@@ -48,7 +50,11 @@ export default function CompetitionsPage() {
         ))}
       </div>
 
-      {shown.length === 0 ? (
+      {comps === null ? (
+        <p className="card mt-8 p-10 text-center text-sm text-ink-muted">
+          در حال بارگذاری…
+        </p>
+      ) : shown.length === 0 ? (
         <p className="card mt-8 p-10 text-center text-sm text-ink-muted">
           فعلاً مسابقه‌ای در این دسته نیست.
         </p>

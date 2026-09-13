@@ -5,8 +5,14 @@ import { api, money, ApiError, type User } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 import { PageHead, Table, Empty, Modal, Badge, roleLabel } from "@/components/admin/ui";
 
+// ROLES فهرست نقش‌های *قابل انتخاب* در پنل است. auditor عمداً در فیلتر
+// جست‌وجو هست ولی در کشویی تخصیص نیست: سرور هم دادن این نقش را رد می‌کند،
+// چون ناظر نباید از سوی همان مدیریتی که بر آن نظارت می‌کند منصوب شود.
 const ROLES = ["user", "judge", "support", "content_admin", "finance_admin", "superadmin"];
-const ELEVATED = ["support", "content_admin", "finance_admin", "superadmin"];
+const FILTER_ROLES = [...ROLES, "auditor"];
+// auditor هم نقش ویژه است و باید در جدول متمایز دیده شود؛ وگرنه حساب ناظر
+// با رنگ کاربر عادی نمایش داده می‌شد و در فهرست گم می‌شد.
+const ELEVATED = ["support", "content_admin", "finance_admin", "superadmin", "auditor"];
 
 export default function AdminUsersPage() {
   const { user: me } = useAuth();
@@ -67,7 +73,7 @@ export default function AdminUsersPage() {
         />
         <select className="field max-w-[12rem]" value={role} onChange={(e) => setRole(e.target.value)}>
           <option value="">همهٔ نقش‌ها</option>
-          {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+          {FILTER_ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
         </select>
       </div>
 
@@ -109,14 +115,29 @@ export default function AdminUsersPage() {
           <div className="mt-5 space-y-4">
             <div>
               <label className="label">نقش</label>
-              <select
-                className="field" value={sel.role} disabled={!canSetRole}
-                onChange={(e) => patch(sel, { role: e.target.value as User["role"] })}
-              >
-                {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-              </select>
-              {!canSetRole && (
-                <p className="mt-1.5 text-xs text-ink-muted">فقط مدیر کل می‌تواند نقش را تغییر دهد.</p>
+              {sel.role === "auditor" ? (
+                // کشویی را برای ناظر نمایش نمی‌دهیم. قبلاً مقدار auditor در
+                // فهرست گزینه‌ها نبود و select خالی رندر می‌شد؛ یک کلیک سهوی
+                // نقش ناظر را عوض می‌کرد. سرور هم این تغییر را رد می‌کند.
+                <>
+                  <p className="field !bg-canvas-alt !text-ink-muted">{roleLabel(sel.role)}</p>
+                  <p className="mt-1.5 text-xs leading-6 text-ink-muted">
+                    نقش ناظر مستقل از پنل مدیریت قابل تغییر نیست و این حساب
+                    مسدود هم نمی‌شود. استقلال نظارت به همین بستگی دارد.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <select
+                    className="field" value={sel.role} disabled={!canSetRole}
+                    onChange={(e) => patch(sel, { role: e.target.value as User["role"] })}
+                  >
+                    {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                  </select>
+                  {!canSetRole && (
+                    <p className="mt-1.5 text-xs text-ink-muted">فقط مدیر کل می‌تواند نقش را تغییر دهد.</p>
+                  )}
+                </>
               )}
             </div>
 
@@ -137,6 +158,9 @@ export default function AdminUsersPage() {
               <input
                 type="checkbox" className="h-4 w-4 accent-[#F0A828]"
                 checked={sel.is_blocked}
+                // مسدود کردن ناظر همان اثر حذف او را دارد و قفل تسویه را
+                // بی‌معنا می‌کند؛ سرور هم رد می‌کند.
+                disabled={sel.role === "auditor"}
                 onChange={(e) => patch(sel, { is_blocked: e.target.checked })}
               />
               حساب مسدود باشد

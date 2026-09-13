@@ -27,6 +27,10 @@ const (
 	RoleFinanceAdmin = "finance_admin"
 	RoleSuperAdmin   = "superadmin"
 	RoleJudge        = "judge"
+	// RoleAuditor ناظر مستقل: فقط می‌خواند و حوادث یکپارچگی را رسیدگی
+	// می‌کند. عمداً در AdminRoles نیست — اگر ناظر به پنل مدیریت دسترسی
+	// داشته باشد، دیگر مستقل از چیزی که بر آن نظارت می‌کند نیست.
+	RoleAuditor = "auditor"
 )
 
 // AdminRoles نقش‌هایی که به هر بخشی از پنل ادمین دسترسی دارند.
@@ -139,6 +143,32 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 			}
 			if !allowed[p.Role] {
 				httpx.Fail(w, http.StatusForbidden, "insufficient permissions")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireExactRole مثل RequireRole است با یک تفاوت حیاتی: superadmin استثنا
+// نمی‌شود. برای مسیرهای ناظر مستقل لازم است — اگر superadmin بتواند خودش را
+// جای ناظر بگذارد و حادثهٔ یکپارچگی را «رسیدگی‌شده» علامت بزند، کل سازوکار
+// نظارت بی‌معنی می‌شود و آن وقت دوباره همان کسی که مظنون است تصمیم‌گیرنده
+// هم هست. مالک سیستم برای نظارت باید حساب auditor جداگانه بسازد.
+func RequireExactRole(roles ...string) func(http.Handler) http.Handler {
+	allowed := make(map[string]bool, len(roles))
+	for _, r := range roles {
+		allowed[r] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := From(r.Context())
+			if !ok {
+				httpx.Fail(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			if !allowed[p.Role] {
+				httpx.Fail(w, http.StatusForbidden, "this area is restricted to the independent auditor")
 				return
 			}
 			next.ServeHTTP(w, r)

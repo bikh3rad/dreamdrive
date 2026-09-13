@@ -30,19 +30,22 @@ const TRUST = [
 ];
 
 export default function HomePage() {
-  const [comps, setComps] = useState<Competition[]>(FALLBACK_COMPETITIONS);
-  const [winners, setWinners] = useState<Winner[]>(FALLBACK_WINNERS);
+  const [comps, setComps] = useState<Competition[] | null>(null);
+  // null یعنی هنوز پاسخی از API نیامده. آرایهٔ خالی یعنی آمده و برنده‌ای
+  // ثبت نشده — این دو نباید یکی گرفته شوند، وگرنه دادهٔ نمونه روی صفحه
+  // می‌ماند و کاربر فکر می‌کند ویرایش‌هایش در پنل اثر نکرده است.
+  const [winners, setWinners] = useState<Winner[] | null>(null);
 
   useEffect(() => {
     api.competitions()
-      .then((r) => { if (r.competitions?.length) setComps(r.competitions); })
-      .catch(() => {});
+      .then((r) => setComps(r.competitions || []))
+      .catch(() => setComps(FALLBACK_COMPETITIONS));
     api.winners()
-      .then((r) => { if (r.winners?.length) setWinners(r.winners); })
-      .catch(() => {});
+      .then((r) => setWinners(r.winners || []))
+      .catch(() => setWinners(FALLBACK_WINNERS));
   }, []);
 
-  const featured = comps[0];
+  const featured = (comps || [])[0];
 
   return (
     <>
@@ -178,7 +181,7 @@ export default function HomePage() {
           </div>
 
           <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {comps.slice(0, 3).map((c) => (
+            {(comps || []).slice(0, 3).map((c) => (
               <CompetitionCard key={c.id} c={c} />
             ))}
           </div>
@@ -256,8 +259,14 @@ export default function HomePage() {
             <h2 className="mt-2 text-3xl font-black sm:text-4xl">رویاها به واقعیت رسید</h2>
           </div>
 
+          {winners !== null && winners.length === 0 && (
+            <p className="mt-8 rounded-card bg-white/[.06] px-5 py-6 text-sm text-white/60 ring-1 ring-white/10">
+              هنوز مسابقه‌ای به نتیجه نرسیده است. اولین برنده همین‌جا معرفی می‌شود.
+            </p>
+          )}
+
           <div className="mt-10 grid gap-6 md:grid-cols-3">
-            {winners.slice(0, 3).map((w) => (
+            {(winners || []).slice(0, 3).map((w) => (
               <article key={w.competition_slug} className="overflow-hidden rounded-card bg-white/[.06] ring-1 ring-white/10">
                 <div className="aspect-[16/10] bg-white/5">
                   {/* eslint-disable-next-line @next/next/no-img-element */}

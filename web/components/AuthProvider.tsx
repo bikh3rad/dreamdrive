@@ -69,3 +69,19 @@ export const ADMIN_ROLES = ["support", "content_admin", "finance_admin", "supera
 export function isAdmin(user: User | null): boolean {
   return !!user && ADMIN_ROLES.includes(user.role);
 }
+
+// داور نقش جداگانه‌ای است و در ADMIN_ROLES نیست: داور به پنل مدیریت راه
+// ندارد و ادمین هم نباید کنسول داوری را ببیند. تنها استثنا superadmin است
+// که سمت سرور هم در RequireRole همیشه مجاز شمرده می‌شود — پس اگر اینجا
+// کنارش نگذاریم، لینکی که بک‌اند قبولش دارد در رابط کاربری گم می‌شود.
+export function isJudge(user: User | null): boolean {
+  return !!user && (user.role === "judge" || user.role === "superadmin");
+}
+
+// برخلاف isJudge و isAdmin، superadmin اینجا استثنا نمی‌شود. سمت سرور هم
+// RequireExactRole استفاده شده: اگر مالک سیستم بتواند نقش ناظر را بگیرد،
+// می‌تواند حادثهٔ یکپارچگی خودش را ببندد و قفل تسویه را باز کند — یعنی
+// نظارت مستقل دیگر مستقل نیست. ناظر باید حساب جداگانه داشته باشد.
+export function isAuditor(user: User | null): boolean {
+  return !!user && user.role === "auditor";
+}

@@ -89,6 +89,27 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 			r.Post("/judge/{id}/reveal", s.judgeReveal)
 		})
 
+		// ---- ناظر مستقل ----
+		// RequireExactRole نه RequireRole: superadmin عمداً استثنا نمی‌شود،
+		// وگرنه مالک سیستم می‌توانست حادثهٔ یکپارچگیِ خودش را ببندد و قفل
+		// تسویه را باز کند. ناظر باید حساب جدا داشته باشد.
+		r.Route("/auditor", func(r chi.Router) {
+			r.Use(s.Auth.Required, auth.RequireExactRole(auth.RoleAuditor))
+
+			r.Get("/incidents", s.auditorIncidents)
+			r.Post("/incidents/{id}/ack", s.auditorAck)
+			r.Post("/incidents/{id}/resolve", s.auditorResolve)
+
+			r.Get("/competitions", s.auditorCompetitions)
+			// POST نه GET: این بررسی در صورت شکست، حادثه ثبت می‌کند. با GET
+			// یک ناوبری ساده از سایت بیرونی (کوکی samesite=lax همراه می‌رود)
+			// می‌توانست به نام ناظر قفل تسویه بیندازد.
+			r.Post("/competitions/{id}/verify", s.auditorVerify)
+			r.Post("/competitions/{id}/incidents", s.auditorRaise)
+			r.Get("/competitions/{id}/panel", s.auditorPanel)
+			r.Get("/audit", s.auditorAudit)
+		})
+
 		// ---- ادمین ----
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(s.Auth.Required, auth.RequireRole(auth.AdminRoles...))
@@ -141,7 +162,7 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Use(auth.RequireRole(auth.RoleSuperAdmin))
 				r.Get("/competitions/{id}/panel", s.adminPanel)
 				r.Get("/competitions/{id}/entries", s.adminEntries)
-				r.Get("/competitions/{id}/verify", s.adminVerifyChain)
+				r.Post("/competitions/{id}/verify", s.adminVerifyChain)
 				r.Post("/competitions/{id}/settle", s.adminSettle)
 				r.Post("/competitions/{id}/video", s.adminSetVideo)
 			})

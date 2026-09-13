@@ -42,8 +42,15 @@
 2. **مهر زمانی و تغییرناپذیری ورودی‌ها.** هر `entry` با `created_at` و یک هش زنجیره‌ای
    (`prev_hash`) ذخیره می‌شود؛ دستکاری گذشته قابل تشخیص است.
 3. **جداسازی نقش‌ها + لاگ ممیزی.** نقش‌ها: `user`, `support`, `content_admin`,
-   `finance_admin`, `superadmin`, `judge`. هیچ نقش ادمینی به مختصات ورودی‌های کاربران
-   دسترسی خواندنی ندارد تا قبل از بسته‌شدن مسابقه. تمام اقدامات ادمین در `audit_log`.
+   `finance_admin`, `superadmin`, `judge`, `auditor`. هیچ نقش ادمینی به مختصات ورودی‌های
+   کاربران دسترسی خواندنی ندارد تا قبل از بسته‌شدن مسابقه. تمام اقدامات ادمین در `audit_log`.
+4. **ناظر مستقل و قفل تسویه.** نقش `auditor` فقط می‌خواند (`/audit`) و تنها عمل نوشتنی‌اش
+   رسیدگی به حادثهٔ یکپارچگی است. شکستن زنجیره در `integrity_incidents` ثبت می‌شود —
+   جدولی که با تریگر `BEFORE UPDATE OR DELETE` فقط‌افزودنی است (GRANT کافی نبود چون
+   برنامه با یک کاربر پایگاه‌داده کار می‌کند). `Settle` پیش از هر کاری زنجیره را دوباره
+   بررسی می‌کند و اگر حادثهٔ رسیدگی‌نشده‌ای باشد `ErrIncidentOpen` برمی‌گرداند.
+   مسیرهای `/api/auditor/*` با `RequireExactRole` گیت شده‌اند، یعنی `superadmin` هم
+   راه ندارد؛ وگرنه مالک سیستم می‌توانست حادثهٔ خودش را ببندد.
 
 ## ۳. مدل داده (خلاصه)
 
@@ -58,6 +65,9 @@ entries          (id, user_id, competition_id, order_item_id, x, y, prev_hash, h
 judges           (user_id, display_name, credentials)
 judge_commits    (competition_id, judge_id, commit_hash, committed_at)
 judge_reveals    (competition_id, judge_id, x, y, nonce, revealed_at)
+integrity_incidents (competition_id, kind, detail, first_bad_seq, checked_count,
+                     detected_at, status[open|acknowledged|resolved], ack_by,
+                     resolution, resolved_by)   -- فقط‌افزودنی، با تریگر
 results          (competition_id, final_x, final_y, winner_entry_id, decided_at)
 pages            (slug, title, body_md, published)     -- CMS
 site_settings    (key, value_json)                     -- تم، منو، بنر

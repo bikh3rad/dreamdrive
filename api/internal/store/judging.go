@@ -18,6 +18,8 @@ var (
 	ErrCommitMismatch = errors.New("revealed values do not match the committed hash")
 	ErrAlreadySettled = errors.New("competition already settled")
 	ErrNoCommits      = errors.New("no judge commits recorded")
+
+	ErrAlreadyCommitted = errors.New("a commit is already lodged for this competition and cannot be changed")
 )
 
 // CommitHash هشِ تعهد داور را می‌سازد: SHA256("x|y|nonce") با ۶ رقم اعشار ثابت.
@@ -44,12 +46,22 @@ func (s *Store) Commit(ctx context.Context, compID, judgeID uuid.UUID, hash stri
 	if c.Status != "open" && c.Status != "draft" {
 		return errors.New("commits must be lodged before the competition closes")
 	}
-	_, err = s.DB.Exec(ctx,
+	// تعهد باید واقعاً یک‌بارمصرف باشد. با DO UPDATE داور می‌توانست تا لحظهٔ
+	// بسته‌شدن هرچندبار که خواست هش را عوض کند و این کل ارزش commit-reveal را
+	// از بین می‌برد: کسی که ورودی‌های پرتکرار را ببیند می‌تواند تعهدش را روی
+	// نقطه‌ای بگذارد که کمترین برنده را بسازد. رابط کاربری هم همین را وعده
+	// می‌دهد («قابل تغییر نیست»)، پس سرور باید آن را تضمین کند.
+	tag, err := s.DB.Exec(ctx,
 		`INSERT INTO judge_commits (competition_id, judge_id, commit_hash) VALUES ($1,$2,$3)
-		 ON CONFLICT (competition_id, judge_id) DO UPDATE SET commit_hash=EXCLUDED.commit_hash,
-		     committed_at = now()`,
+		 ON CONFLICT (competition_id, judge_id) DO NOTHING`,
 		compID, judgeID, hash)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAlreadyCommitted
+	}
+	return nil
 }
 
 // Reveal آشکارسازی رأی داور. سرور تطابق با هشِ تعهد را بررسی می‌کند.
@@ -90,7 +102,12 @@ func (s *Store) JudgePanel(ctx context.Context, compID uuid.UUID) ([]JudgeStatus
 		 FROM users u
 		 LEFT JOIN judge_commits jc ON jc.judge_id=u.id AND jc.competition_id=$1
 		 LEFT JOIN judge_reveals jr ON jr.judge_id=u.id AND jr.competition_id=$1
-		 WHERE u.role='judge'
+		 -- شرط دوم مهم است: Settle همهٔ ردیف‌های judge_commits را می‌شمارد
+		 -- بدون توجه به نقش. اگر پنل فقط role='judge' را نشان دهد، کسی که
+		 -- با نقش دیگری (مثلاً superadmin) تعهد داده در شمارش هست ولی در
+		 -- جدول نیست؛ آن‌وقت ادمین می‌بیند «همه افشا کرده‌اند» اما سرور
+		 -- می‌گوید «منتظر ۱ افشا» و هیچ راهی برای یافتن آن نفر نیست.
+		 WHERE u.role='judge' OR jc.judge_id IS NOT NULL
 		 ORDER BY u.full_name`, compID)
 	if err != nil {
 		return nil, err
@@ -123,11 +140,66 @@ func (s *Store) Settle(ctx context.Context, compID uuid.UUID) (Result, error) {
 		return res, ErrNotClosed
 	}
 
+	// زنجیره پیش از تسویه بازمحاسبه می‌شود. اتکا به اینکه «ادمین یادش باشد
+	// دکمهٔ بررسی را بزند» کافی نیست: مسیر اصلی باید خودش امن باشد.
+	// این بررسی بیرون از تراکنش است چون اسکن کامل entries طولانی است و
+	// نباید قفل ردیف مسابقه را آن‌قدر نگه دارد؛ نتیجه‌اش هم تنها می‌تواند
+	// حادثه بسازد، نه حادثهٔ موجود را نادیده بگیرد.
+	checked, badSeq, err := s.VerifyEntryChain(ctx, compID)
+	if err != nil {
+		return res, err
+	}
+	if badSeq != 0 {
+		// عمداً روی s.DB و نه روی تراکنش: حادثه باید حتی با شکست تسویه
+		// ثبت بماند.
+		if _, e := s.RecordIncident(ctx, compID, "chain_broken",
+			"زنجیرهٔ هش پیشنهادها در زمان تلاش برای تسویه معیوب بود.",
+			badSeq, checked); e != nil {
+			return res, e
+		}
+		return res, ErrIncidentOpen
+	}
+
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return res, err
 	}
 	defer tx.Rollback(ctx)
+
+	// ردیف مسابقه را قفل می‌کنیم و وضعیت را *درون* تراکنش دوباره می‌خوانیم.
+	// بدون این قفل دو تسویهٔ هم‌زمان هر دو از بررسی بالا رد می‌شدند و
+	// awardNearMiss دو بار اعتبار واریز می‌کرد.
+	var lockedStatus string
+	if err := tx.QueryRow(ctx,
+		`SELECT status FROM competitions WHERE id=$1 FOR UPDATE`, compID).
+		Scan(&lockedStatus); err != nil {
+		return res, err
+	}
+	if lockedStatus == "settled" {
+		return res, ErrAlreadySettled
+	}
+	if lockedStatus != "closed" && lockedStatus != "judging" {
+		return res, ErrNotClosed
+	}
+
+	// قفل تسویه: تا وقتی حادثهٔ یکپارچگیِ رسیدگی‌نشده روی این مسابقه ثبت
+	// است، هیچ نقشی نمی‌تواند برنده اعلام کند. فقط ناظر مستقل می‌تواند این
+	// قفل را با ثبت توضیح مکتوب باز کند.
+	//
+	// این بررسی باید درون همین تراکنش و پس از قفل‌شدن ردیف باشد: اگر بیرون
+	// بود، حادثه‌ای که بین بررسی و Commit ثبت می‌شد نادیده می‌ماند و مسابقه
+	// با زنجیرهٔ مشکوک تسویه می‌شد — دقیقاً همان چیزی که قفل برای جلوگیری
+	// از آن ساخته شده است.
+	var openIncidents int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM integrity_incidents
+		  WHERE competition_id=$1 AND status <> 'resolved'`, compID).
+		Scan(&openIncidents); err != nil {
+		return res, err
+	}
+	if openIncidents > 0 {
+		return res, ErrIncidentOpen
+	}
 
 	// همهٔ داورانی که تعهد داده‌اند باید آشکارسازی کرده باشند
 	var commits, reveals int

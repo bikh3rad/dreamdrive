@@ -4,7 +4,8 @@ export const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 export type Role =
-  | "user" | "support" | "content_admin" | "finance_admin" | "superadmin" | "judge";
+  | "user" | "support" | "content_admin" | "finance_admin" | "superadmin"
+  | "judge" | "auditor";
 
 export interface User {
   id: string;
@@ -119,6 +120,43 @@ export interface JudgeStatus {
   revealed: boolean;
   x?: number;
   y?: number;
+}
+
+export interface Incident {
+  id: number;
+  competition_id: string;
+  competition_slug?: string;
+  competition_title?: string;
+  kind: "chain_broken" | "settle_blocked" | "commit_conflict" | "manual";
+  detail: string;
+  first_bad_seq: number;
+  checked_count: number;
+  detected_at: string;
+  status: "open" | "acknowledged" | "resolved";
+  ack_by?: string;
+  ack_by_email?: string;
+  ack_at?: string;
+  resolution: string;
+  resolved_by?: string;
+  resolved_at?: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  actor_id?: string;
+  actor_email?: string;
+  action: string;
+  target: string;
+  meta: Record<string, unknown>;
+  ip: string;
+  created_at: string;
+}
+
+export interface ChainCheck {
+  checked: number;
+  intact: boolean;
+  first_bad_seq: number;
+  incident_id?: number;
 }
 
 const TOKEN_KEY = "dd_token";
@@ -270,6 +308,37 @@ export const api = {
       }),
   },
 
+  // ناظر مستقل — همه فقط-خواندنی جز رسیدگی به حادثه
+  auditor: {
+    incidents: (onlyOpen = false) =>
+      request<{ incidents: Incident[] }>(
+        `/api/auditor/incidents${onlyOpen ? "?open=1" : ""}`,
+      ),
+    ack: (id: number) =>
+      request<{ status: string }>(`/api/auditor/incidents/${id}/ack`, {
+        method: "POST",
+      }),
+    resolve: (id: number, resolution: string) =>
+      request<{ status: string }>(`/api/auditor/incidents/${id}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({ resolution }),
+      }),
+    competitions: () =>
+      request<{ competitions: Competition[] }>("/api/auditor/competitions"),
+    // POST چون در صورت شکست زنجیره حادثه ثبت می‌شود
+    verify: (id: string) =>
+      request<ChainCheck>(`/api/auditor/competitions/${id}/verify`, { method: "POST" }),
+    raise: (id: string, detail: string) =>
+      request<{ incident_id: number; status: string }>(
+        `/api/auditor/competitions/${id}/incidents`,
+        { method: "POST", body: JSON.stringify({ detail }) },
+      ),
+    panel: (id: string) =>
+      request<{ panel: JudgeStatus[] }>(`/api/auditor/competitions/${id}/panel`),
+    audit: (limit = 100) =>
+      request<{ entries: AuditEntry[] }>(`/api/auditor/audit?limit=${limit}`),
+  },
+
   // ادمین
   admin: {
     stats: () => request<Stats>("/api/admin/stats"),
@@ -328,9 +397,7 @@ export const api = {
     panel: (id: string) => request<{ panel: JudgeStatus[] }>(`/api/admin/competitions/${id}/panel`),
     entries: (id: string) => request<{ entries: Entry[] }>(`/api/admin/competitions/${id}/entries`),
     verify: (id: string) =>
-      request<{ checked: number; intact: boolean; first_bad_seq: number }>(
-        `/api/admin/competitions/${id}/verify`,
-      ),
+      request<ChainCheck>(`/api/admin/competitions/${id}/verify`, { method: "POST" }),
     settle: (id: string) => request<any>(`/api/admin/competitions/${id}/settle`, { method: "POST" }),
   },
 };

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  api, faNum, money, timeLeft,
+  api, faNum, money, timeLeft, ApiError,
   type Competition, type CompetitionResult, type JudgeStatus,
 } from "@/lib/api";
 import { FALLBACK_COMPETITIONS } from "@/lib/fallback";
@@ -15,15 +15,35 @@ export default function CompetitionPage({ params }: { params: { slug: string } }
   const [c, setC] = useState<Competition | null>(null);
   const [result, setResult] = useState<CompetitionResult | null>(null);
   const [panel, setPanel] = useState<JudgeStatus[]>([]);
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     api.competition(params.slug)
       .then(setC)
-      .catch(() => setC(FALLBACK_COMPETITIONS.find((x) => x.slug === params.slug) || null));
+      // فقط قطعی شبکه به دادهٔ نمونه برمی‌گردد؛ ۴۰۴ یعنی این مسابقه واقعاً
+      // وجود ندارد و نباید با نمونه پوشانده شود.
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 404) {
+          setMissing(true);
+          return;
+        }
+        setC(FALLBACK_COMPETITIONS.find((x) => x.slug === params.slug) || null);
+      });
     api.result(params.slug)
       .then((r) => { setResult(r.result); setPanel(r.panel || []); })
       .catch(() => {});
   }, [params.slug]);
+
+  if (missing) {
+    return (
+      <div className="py-24 text-center">
+        <p className="text-ink-muted">این مسابقه دیگر در دسترس نیست.</p>
+        <Link href="/competitions" className="btn-primary mt-6 inline-flex">
+          دیدن مسابقه‌های باز
+        </Link>
+      </div>
+    );
+  }
 
   if (!c) return <div className="py-24 text-center text-ink-muted">در حال بارگذاری…</div>;
 

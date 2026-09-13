@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, ApiError, type Competition } from "@/lib/api";
 import { commitHash, randomNonce } from "@/lib/commit";
-import { useAuth } from "@/components/AuthProvider";
+import { useAuth, isJudge } from "@/components/AuthProvider";
 import { SpotBoard, type Marker } from "@/components/SpotBoard";
 import { IconLock, IconCheck, IconShield } from "@/components/icons";
 
@@ -20,7 +21,9 @@ export default function JudgeConsole() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
+    // بدون این شرط، هر کاربر عادی که آدرس را باز کند یک ۴۰۳ بی‌مورد به
+    // لاگ سرور می‌زند.
+    if (!isJudge(user)) return;
     api.judge.competitions().then((r) => setComps(r.competitions || [])).catch(() => {});
   }, [user]);
 
@@ -42,7 +45,16 @@ export default function JudgeConsole() {
       setSaved(rec);
       setMsg({ kind: "ok", text: "تعهد ثبت شد. نقطه و nonce فقط روی همین مرورگر ذخیره شده است — آن را جای امنی هم یادداشت کن." });
     } catch (e) {
-      setMsg({ kind: "err", text: e instanceof ApiError ? e.message : "ثبت تعهد ناموفق بود." });
+      // ۴۰۹ یعنی سرور از قبل تعهدی برای این داور دارد. چون تعهد غیرقابل
+      // تغییر است، این حالت معمولاً وقتی پیش می‌آید که حافظهٔ مرورگر پاک
+      // شده باشد؛ در آن صورت nonce از دست رفته و باید دستی بازیابی شود.
+      const dup = e instanceof ApiError && e.status === 409;
+      setMsg({
+        kind: "err",
+        text: dup
+          ? "برای این مسابقه از قبل تعهدی ثبت شده و تعهد قابل تغییر نیست. اگر نقطه و nonce را در این مرورگر ندارید، برای افشا باید از نسخهٔ یادداشت‌شدهٔ آن استفاده کنید."
+          : e instanceof ApiError ? e.message : "ثبت تعهد ناموفق بود.",
+      });
     } finally { setBusy(false); }
   };
 
@@ -58,11 +70,29 @@ export default function JudgeConsole() {
   };
 
   if (loading) return <div className="py-24 text-center text-ink-muted">…</div>;
-  if (!user || (user.role !== "judge" && user.role !== "superadmin"))
+
+  // کاربر واردنشده و کاربرِ بی‌مجوز دو حالت متفاوت‌اند: اولی فقط باید وارد
+  // شود، دومی هرچه کند راه ندارد. یکی گرفتنشان یعنی داوری که هنوز لاگین
+  // نکرده پیام «دسترسی نداری» می‌بیند و فکر می‌کند نقشش اشتباه ثبت شده.
+  if (!user)
+    return (
+      <div className="mx-auto max-w-md px-4 py-24 text-center">
+        <h1 className="text-2xl font-black text-ink">کنسول داوری</h1>
+        <p className="mt-3 text-sm text-ink-muted">برای ثبت رأی با حساب داوری وارد شو.</p>
+        <Link href="/login?next=/judge" className="btn-primary mt-6 inline-flex">
+          ورود
+        </Link>
+      </div>
+    );
+
+  if (!isJudge(user))
     return (
       <div className="mx-auto max-w-md px-4 py-24 text-center">
         <h1 className="text-2xl font-black text-ink">این بخش مخصوص داوران است</h1>
-        <p className="mt-3 text-sm text-ink-muted">با حساب داوری وارد شو.</p>
+        <p className="mt-3 text-sm text-ink-muted">
+          حساب فعلی شما نقش داوری ندارد. اگر باید داور باشید، از مدیر سایت
+          بخواهید نقش حسابتان را در «مدیریت کاربران» به «داور» تغییر دهد.
+        </p>
       </div>
     );
 
@@ -131,7 +161,13 @@ export default function JudgeConsole() {
             )}
 
             <div className="flex flex-wrap gap-3">
-              <button onClick={doCommit} disabled={!mark || !!saved || busy || sel.status !== "open"} className="btn-primary !py-2.5 text-sm">
+              {/* همان شرطی که store دارد: تعهد تا پیش از بسته‌شدن مجاز است،
+                  یعنی draft و open. */}
+              <button
+                onClick={doCommit}
+                disabled={!mark || !!saved || busy || (sel.status !== "open" && sel.status !== "draft")}
+                className="btn-primary !py-2.5 text-sm"
+              >
                 <IconLock className="h-4 w-4" />
                 ثبت تعهد
               </button>

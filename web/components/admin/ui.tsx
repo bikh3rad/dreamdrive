@@ -10,6 +10,7 @@ export function roleLabel(r: string): string {
     finance_admin: "مدیر مالی",
     superadmin: "مدیر کل",
     judge: "داور",
+    auditor: "ناظر مستقل",
   }[r] || r;
 }
 

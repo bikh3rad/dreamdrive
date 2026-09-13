@@ -22,17 +22,38 @@ export default function PlayPage({ params }: { params: { slug: string } }) {
   const [marks, setMarks] = useState<Marker[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     api.competition(params.slug)
       .then(setComp)
-      .catch(() => setComp(FALLBACK_COMPETITIONS.find((c) => c.slug === params.slug) || FALLBACK_COMPETITIONS[0]));
+      .catch((e) => {
+        // ۴۰۴ یعنی این مسابقه واقعاً نیست (حذف یا slug عوض شده). نشان دادن
+        // یک مسابقهٔ نمونه به‌جایش خطرناک است: دکمه‌های خرید روی slugی کار
+        // می‌کنند که وجود ندارد.
+        if (e instanceof ApiError && e.status === 404) {
+          setMissing(true);
+          return;
+        }
+        setComp(FALLBACK_COMPETITIONS.find((c) => c.slug === params.slug) || null);
+      });
   }, [params.slug]);
 
   const total = useMemo(
     () => (comp ? marks.length * comp.ticket_price_cents : 0),
     [marks.length, comp],
   );
+
+  if (missing) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-24 text-center">
+        <p className="text-ink-muted">این مسابقه دیگر در دسترس نیست.</p>
+        <Link href="/competitions" className="btn-primary mt-6 inline-flex">
+          دیدن مسابقه‌های باز
+        </Link>
+      </div>
+    );
+  }
 
   if (!comp) {
     return <div className="mx-auto max-w-7xl px-4 py-24 text-center text-ink-muted">در حال بارگذاری…</div>;
