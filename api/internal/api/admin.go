@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -154,10 +155,17 @@ func (s *Server) adminDeleteMedia(w http.ResponseWriter, r *http.Request) {
 // ---------- مسابقات ----------
 
 func (s *Server) adminListCompetitions(w http.ResponseWriter, r *http.Request) {
-	comps, err := s.St.ListCompetitions(r.Context(), nil, true)
+	// ادمین باید سطوح بازنشسته را هم ببیند، وگرنه ویرایش فرم آن‌ها را حذف می‌کند.
+	comps, err := s.St.ListCompetitions(r.Context(), nil, true, true)
 	if err != nil {
 		httpx.Fail(w, 500, "could not load competitions")
 		return
+	}
+	// درآمد فقط در این مسیر ضمیمه می‌شود، نه در ListCompetitions، تا به
+	// پاسخ عمومی /api/competitions نشت نکند. خطایش کشنده نیست: فهرست
+	// مسابقه‌ها بدون ستون درآمد بهتر از صفحهٔ خالی است.
+	if err := s.St.AttachRevenue(r.Context(), comps); err != nil {
+		slog.Error("attachRevenue", "error", err)
 	}
 	httpx.JSON(w, 200, map[string]any{"competitions": comps})
 }
@@ -169,7 +177,7 @@ func (s *Server) adminCreateCompetition(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if in.Currency == "" {
-		in.Currency = "EUR"
+		in.Currency = "IRR"
 	}
 	if in.Status == "" {
 		in.Status = "draft"
@@ -194,9 +202,14 @@ func (s *Server) adminUpdateCompetition(w http.ResponseWriter, r *http.Request) 
 		httpx.Fail(w, 400, "invalid request body")
 		return
 	}
+	if in.Currency == "" {
+		in.Currency = "IRR"
+	}
 	c, err := s.St.UpdateCompetition(r.Context(), id, in)
 	if err != nil {
-		httpx.Fail(w, 400, "could not update competition")
+		// پیام خطا بازگردانده می‌شود چون اعتبارسنجی سطوح جایزه اینجا رد
+		// می‌شود و ادمین باید بداند کدام قاعده شکسته، نه فقط «نشد».
+		httpx.Fail(w, 400, "could not update competition: "+err.Error())
 		return
 	}
 	s.audit(r, "competition.update", c.Slug, nil)
@@ -564,7 +577,7 @@ func (s *Server) judgeCompetitions(w http.ResponseWriter, r *http.Request) {
 	// عمومی‌شدن مسابقه نقطه‌اش را قفل کند. اگر اینجا نباشد، آن مسیر هرگز از
 	// رابط کاربری در دسترس نیست.
 	comps, err := s.St.ListCompetitions(r.Context(),
-		[]string{"draft", "open", "closed", "judging"}, true)
+		[]string{"draft", "open", "closed", "judging"}, true, true)
 	if err != nil {
 		httpx.Fail(w, 500, "could not load competitions")
 		return

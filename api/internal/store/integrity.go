@@ -89,7 +89,10 @@ func (s *Store) HasOpenIncident(ctx context.Context, compID uuid.UUID) (bool, er
 	return n > 0, nil
 }
 
-const incidentCols = `i.id, i.competition_id, c.slug, COALESCE(p.title, c.title),
+// عنوان مسابقه از خود مسابقه خوانده می‌شود. پیش‌تر عنوان جایزه را ترجیح
+// می‌داد، ولی با چند جایزه در یک مسابقه دیگر «جایزهٔ آن مسابقه» وجود ندارد
+// و ناظر باید بداند حادثه روی کدام دوره است، نه کدام جایزه.
+const incidentCols = `i.id, i.competition_id, c.slug, c.title,
 	i.kind, i.detail, i.first_bad_seq, i.checked_count, i.detected_at, i.status,
 	i.ack_by, COALESCE(ua.email,''), i.ack_at, i.resolution, i.resolved_by, i.resolved_at`
 
@@ -102,7 +105,6 @@ func (s *Store) ListIncidents(ctx context.Context, onlyOpen bool, limit int) ([]
 		`SELECT `+incidentCols+`
 		 FROM integrity_incidents i
 		 JOIN competitions c ON c.id=i.competition_id
-		 LEFT JOIN prizes p ON p.id=c.prize_id
 		 LEFT JOIN users ua ON ua.id=i.ack_by
 		 WHERE ($1 = FALSE OR i.status <> 'resolved')
 		 ORDER BY i.id DESC LIMIT $2`, onlyOpen, limit)

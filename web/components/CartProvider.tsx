@@ -5,6 +5,9 @@ import { createContext, useContext, useState } from "react";
 export interface Pick {
   competitionSlug: string;
   competitionTitle: string;
+  /** سطح جایزه‌ای که این حدس برای آن خریده می‌شود. */
+  competitionPrizeId: string;
+  prizeTitle: string;
   x: number;
   y: number;
   priceCents: number;
@@ -18,7 +21,11 @@ interface CartCtx {
   clear: () => void;
   totalCents: number;
   /** گروه‌بندی برای ارسال به API */
-  lines: () => { competition_slug: string; picks: { x: number; y: number }[] }[];
+  lines: () => {
+    competition_slug: string;
+    competition_prize_id: string;
+    picks: { x: number; y: number }[];
+  }[];
 }
 
 const Ctx = createContext<CartCtx | null>(null);
@@ -32,17 +39,23 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const totalCents = picks.reduce((sum, p) => sum + p.priceCents, 0);
 
+  // گروه‌بندی بر اساس سطح جایزه است، نه مسابقه: کاربر می‌تواند در یک دوره
+  // چند حدس با جوایز مختلف بخرد و هر کدام قیمت خودش را دارد. با گروه‌بندی
+  // در سطح مسابقه، همهٔ حدس‌ها به یک جایزه نسبت داده می‌شدند.
   const lines = () => {
-    const byComp = new Map<string, { x: number; y: number }[]>();
+    const byLevel = new Map<
+      string,
+      { competition_slug: string; competition_prize_id: string; picks: { x: number; y: number }[] }
+    >();
     for (const p of picks) {
-      const arr = byComp.get(p.competitionSlug) || [];
-      arr.push({ x: p.x, y: p.y });
-      byComp.set(p.competitionSlug, arr);
+      const key = p.competitionPrizeId;
+      const line =
+        byLevel.get(key) ||
+        { competition_slug: p.competitionSlug, competition_prize_id: key, picks: [] };
+      line.picks.push({ x: p.x, y: p.y });
+      byLevel.set(key, line);
     }
-    return [...byComp.entries()].map(([competition_slug, picks]) => ({
-      competition_slug,
-      picks,
-    }));
+    return [...byLevel.values()];
   };
 
   return (

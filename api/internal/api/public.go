@@ -106,7 +106,8 @@ func (s *Server) listCompetitions(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("include") == "all" {
 		statuses = []string{"open", "closed", "judging", "settled"}
 	}
-	comps, err := s.St.ListCompetitions(r.Context(), statuses, true)
+	// مسیر عمومی: سطح بازنشسته اصلاً فرستاده نمی‌شود.
+	comps, err := s.St.ListCompetitions(r.Context(), statuses, true, false)
 	if err != nil {
 		httpx.Fail(w, 500, "could not load competitions")
 		return
@@ -218,6 +219,10 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, store.ErrCompetitionClosed):
 			httpx.Fail(w, 409, "that competition is no longer open for entries")
+		case errors.Is(err, store.ErrTargetReached):
+			// پیام جدا از ErrEntryLimit: آنجا سهم خودِ کاربر تمام شده، اینجا
+			// ظرفیت کل دوره پر شده و مشکلی از سمت کاربر نیست.
+			httpx.Fail(w, 409, "ظرفیت این مسابقه تکمیل شده و وارد مرحلهٔ داوری می‌شود")
 		case errors.Is(err, store.ErrEntryLimit):
 			httpx.Fail(w, 409, "you have reached the entry limit for this competition")
 		case errors.Is(err, store.ErrInsider), errors.Is(err, store.ErrBlocked):
@@ -234,10 +239,13 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) freeEntry(w http.ResponseWriter, r *http.Request) {
 	p, _ := auth.From(r.Context())
+	// شرکت‌کنندهٔ رایگان هم جایزه‌اش را خودش انتخاب می‌کند؛ اگر این فیلد
+	// اختیاری می‌شد، مسیر رایگان دیگر معادل مسیر پولی نبود.
 	var req struct {
-		Slug string  `json:"competition_slug"`
-		X    float64 `json:"x"`
-		Y    float64 `json:"y"`
+		Slug               string    `json:"competition_slug"`
+		CompetitionPrizeID uuid.UUID `json:"competition_prize_id"`
+		X                  float64   `json:"x"`
+		Y                  float64   `json:"y"`
 	}
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, 400, "invalid request body")
@@ -247,9 +255,20 @@ func (s *Server) freeEntry(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 400, "coordinates must be between 0 and 1")
 		return
 	}
-	e, err := s.St.FreeEntry(r.Context(), p.ID, req.Slug, req.X, req.Y)
+	if req.CompetitionPrizeID == uuid.Nil {
+		httpx.Fail(w, 400, "یک جایزه انتخاب کنید")
+		return
+	}
+	e, err := s.St.FreeEntry(r.Context(), p.ID, req.Slug, req.CompetitionPrizeID, req.X, req.Y)
 	if err != nil {
-		httpx.Fail(w, 409, err.Error())
+		switch {
+		case errors.Is(err, store.ErrInsider), errors.Is(err, store.ErrBlocked):
+			httpx.Fail(w, 403, err.Error())
+		case errors.Is(err, store.ErrTargetReached):
+			httpx.Fail(w, 409, "ظرفیت این مسابقه تکمیل شده و وارد مرحلهٔ داوری می‌شود")
+		default:
+			httpx.Fail(w, 409, err.Error())
+		}
 		return
 	}
 	s.St.Audit(r.Context(), &p.ID, "entry.free", req.Slug, nil, httpx.ClientIP(r))

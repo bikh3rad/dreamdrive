@@ -195,14 +195,23 @@ func (s *Store) RecentWinners(ctx context.Context, limit int) ([]Winner, error) 
 		limit = 12
 	}
 	rows, err := s.DB.Query(ctx,
-		`SELECT c.slug, c.title, p.title, p.hero_image,
+		// جایزهٔ اهداشده از results.awarded_prize_id می‌آید، نه از مسابقه:
+		// یک مسابقه چند جایزه دارد ولی فقط یکی از آن‌ها برنده داشته است.
+		//
+		// پیوندها عمداً LEFT هستند. با JOIN معمولی، دوره‌ای که هنوز
+		// awarded_prize_id ندارد (مثلاً بدون هیچ ورودی تسویه شده) کلاً از
+		// فهرست حذف می‌شد و صفحهٔ برندگان بی‌سروصدا کوتاه‌تر می‌شد — همان
+		// اتفاقی که با ستون بازنشستهٔ c.prize_id می‌افتاد.
+		`SELECT c.slug, c.title, COALESCE(p.title,''), COALESCE(p.hero_image,''),
 		        -- نام نمایشی؛ اگر نام کامل نداریم هیچ بخشی از ایمیل منتشر نمی‌شود
 		        COALESCE(NULLIF(u.full_name,''), 'برندهٔ تأییدشده'),
 		        COALESCE(u.country,''), r.video_url, r.decided_at
 		 FROM results r
 		 JOIN competitions c ON c.id=r.competition_id
-		 JOIN prizes p ON p.id=c.prize_id
+		 LEFT JOIN competition_prizes cp ON cp.id=r.awarded_prize_id
+		 LEFT JOIN prizes p ON p.id=cp.prize_id
 		 LEFT JOIN users u ON u.id=r.winner_user_id
+		 WHERE r.winner_user_id IS NOT NULL
 		 ORDER BY r.decided_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

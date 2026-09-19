@@ -34,20 +34,45 @@ export interface Prize {
   created_at?: string;
 }
 
+/**
+ * یک سطح قابل خرید: جایزه به‌علاوهٔ قیمت بلیط آن.
+ *
+ * انتخاب سطح شانس برنده‌شدن را تغییر نمی‌دهد — همه در یک استخر واحد رقابت
+ * می‌کنند. فقط تعیین می‌کند اگر این بلیط برندهٔ آن دوره شد چه چیزی تحویل
+ * داده می‌شود.
+ */
+export interface CompetitionPrize {
+  id: string;
+  competition_id: string;
+  prize_id: string;
+  ticket_price_cents: number;
+  sort: number;
+  is_active: boolean;
+  prize?: Prize;
+}
+
 export interface Competition {
   id: string;
   slug: string;
-  prize_id: string;
+  /** بازنشسته — قیمت و جایزه در prizes است. فقط برای دادهٔ قدیمی. */
+  prize_id?: string;
   title: string;
-  ticket_price_cents: number;
+  /** بازنشسته — به prizes[].ticket_price_cents نگاه کن. */
+  ticket_price_cents?: number;
   currency: string;
   board_image: string;
   opens_at: string;
   closes_at: string;
   status: "draft" | "open" | "closed" | "judging" | "settled" | "cancelled";
   max_entries_user: number;
+  /** سقف کل حدس‌های دوره؛ با رسیدن به آن مسابقه بسته و آمادهٔ داوری می‌شود. ۰ = بدون سقف. */
+  entry_target: number;
+  prizes?: CompetitionPrize[];
+  /** جایزهٔ شاخص برای تصویر و تیتر کارت؛ گران‌ترین سطح فعال. */
   prize?: Prize;
   entry_count?: number;
+  /** جمع فروش پرداخت‌شدهٔ همین مسابقه. فقط در پاسخ‌های مدیریتی می‌آید. */
+  revenue_cents?: number;
   created_at?: string;
 }
 
@@ -56,6 +81,8 @@ export interface Entry {
   user_id?: string;
   competition_id: string;
   competition_slug?: string;
+  competition_prize_id?: string;
+  prize_title?: string;
   x: number;
   y: number;
   is_free_entry: boolean;
@@ -75,7 +102,14 @@ export interface Order {
   provider_ref?: string;
   created_at: string;
   paid_at: string | null;
-  items?: { competition_slug?: string; title?: string; qty: number; unit_price_cents: number }[];
+  items?: {
+    competition_slug?: string;
+    title?: string;
+    competition_prize_id?: string;
+    prize_title?: string;
+    qty: number;
+    unit_price_cents: number;
+  }[];
 }
 
 export interface Winner {
@@ -108,6 +142,13 @@ export interface CompetitionResult {
   /** فقط در پاسخ‌های مدیریتی پر می‌شود؛ در API عمومی خالی است */
   winner_email?: string;
   winner_name?: string;
+  /**
+   * جایزه‌ای که واقعاً اهدا شد — همانی که برنده هنگام شرکت انتخاب کرده بود.
+   * خالی یعنی این دوره برنده نداشت. بقیهٔ جوایز همان دوره اهدا نمی‌شوند و
+   * این حالت طبیعی است، نه خطا.
+   */
+  awarded_prize_id?: string;
+  awarded_title?: string;
   distance: number;
   video_url: string;
   decided_at: string;
@@ -279,15 +320,24 @@ export const api = {
   settings: () => request<Record<string, any>>("/api/settings"),
 
   // کاربر
-  checkout: (lines: { competition_slug: string; picks: { x: number; y: number }[] }[], useCredit = false) =>
+  // هر قلم به یک سطح جایزه گره می‌خورد. قیمت عمداً فرستاده نمی‌شود — سرور
+  // آن را از روی competition_prize_id می‌خواند.
+  checkout: (
+    lines: {
+      competition_slug: string;
+      competition_prize_id: string;
+      picks: { x: number; y: number }[];
+    }[],
+    useCredit = false,
+  ) =>
     request<{ order: Order; entries: Entry[] }>("/api/checkout", {
       method: "POST",
       body: JSON.stringify({ lines, use_credit: useCredit }),
     }),
-  freeEntry: (competition_slug: string, x: number, y: number) =>
+  freeEntry: (competition_slug: string, competition_prize_id: string, x: number, y: number) =>
     request<Entry>("/api/free-entry", {
       method: "POST",
-      body: JSON.stringify({ competition_slug, x, y }),
+      body: JSON.stringify({ competition_slug, competition_prize_id, x, y }),
     }),
   myEntries: () => request<{ entries: Entry[] }>("/api/me/entries"),
   myOrders: () => request<{ orders: Order[] }>("/api/me/orders"),
@@ -404,9 +454,46 @@ export const api = {
 
 // ---------- کمک‌توابع نمایش ----------
 
-export function money(cents: number, currency = "CAD"): string {
+/**
+ * مبلغ را از «کمترین واحد پول» به متن نمایشی تبدیل می‌کند.
+ *
+ * ریال زیرواحد ندارد: عدد ذخیره‌شده خودِ ریال است و نباید بر ۱۰۰ تقسیم شود.
+ * تقسیم‌کردن یعنی نمایش یک‌صدم قیمت واقعی — خطایی که در ظاهر بی‌ضرر است و
+ * مستقیم به شکایت مالی می‌رسد. برای ارزهای زیرواحددار (یورو، دلار) رفتار
+ * قبلی حفظ شده تا دادهٔ تاریخی درست دیده شود.
+ */
+const NO_SUBUNIT = new Set(["IRR", "IRT", "JPY", "KRW", "VND"]);
+
+export function money(cents: number, currency = "IRR"): string {
+  if (NO_SUBUNIT.has(currency)) {
+    const label = currency === "IRR" ? "ریال" : currency;
+    return `${faNum(Math.round(cents).toLocaleString("en-US"))} ${label}`;
+  }
   const symbol = currency === "CAD" ? "CA$" : currency === "EUR" ? "€" : "$";
   return `${symbol}${(cents / 100).toFixed(2)}`;
+}
+
+/** سطوح قابل خرید یک مسابقه، مرتب بر اساس قیمت. */
+export function activeLevels(c: Competition): CompetitionPrize[] {
+  return (c.prizes || [])
+    .filter((l) => l.is_active)
+    .sort((a, b) => a.ticket_price_cents - b.ticket_price_cents);
+}
+
+/**
+ * قیمت شروع: ارزان‌ترین سطح فعال.
+ *
+ * برای کارت و فهرست، «از … » درست‌تر از یک قیمت واحد است؛ نمایش گران‌ترین
+ * قیمت به‌عنوان قیمت مسابقه، کاربر را بی‌دلیل پس می‌زند.
+ */
+export function startingPrice(c: Competition): number | null {
+  const lv = activeLevels(c);
+  return lv.length ? lv[0].ticket_price_cents : null;
+}
+
+/** همان مبلغ به تومان — برای جایی که می‌خواهیم واحد آشناتر نشان دهیم. */
+export function toman(rials: number): string {
+  return `${faNum(Math.round(rials / 10).toLocaleString("en-US"))} تومان`;
 }
 
 export function faNum(n: number | string): string {

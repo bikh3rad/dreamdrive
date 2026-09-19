@@ -168,24 +168,54 @@ func main() {
 	const board = "https://images.unsplash.com/photo-1522778119026-d647f0596c20?w=1600&q=80"
 	now := time.Now()
 
+	// قیمت‌ها به ریال‌اند و بدون زیرواحد: ۵٬۰۰۰٬۰۰۰ یعنی پانصد هزار تومان.
+	//
+	// نخستین مسابقه عمداً دو سطح دارد تا همان سناریویی که مدل برای آن ساخته
+	// شده در دادهٔ نمونه دیده شود: یک عکس، یک برنده، دو جایزهٔ ممکن با دو
+	// قیمت. در پایان دوره فقط جایزهٔ همان یک برنده اهدا می‌شود.
+	lvl := func(slug string, price int64, sort int) store.CompetitionPrizeInput {
+		return store.CompetitionPrizeInput{
+			PrizeID: prizeIDs[slug], TicketPriceCents: price, Sort: sort, IsActive: true,
+		}
+	}
+
+	// EntryTarget اشاره‌گر است تا «نفرستاده» از «صریحاً صفر» جدا بماند، و در
+	// یک literal نمی‌شود از عدد آدرس گرفت. مقدار هم عمداً ثابتِ
+	// store.DefaultEntryTarget است نه ۲۰٬۰۰۰ دستی: اگر قاعدهٔ کسب‌وکار عوض
+	// شود، دادهٔ نمونه نباید بی‌صدا روی عدد قدیمی بماند.
+	target := func(n int) *int { return &n }
+
 	comps := []store.CompetitionInput{
 		{
-			Slug: "kish-week-01", PrizeID: prizeIDs["kish-island-dream-week"],
-			Title: "هفته رویایی جزیره کیش", TicketPriceCents: 300, Currency: "CAD",
+			Slug:  "kish-week-01",
+			Title: "هفته رویایی جزیره کیش", Currency: "IRR",
 			BoardImage: board, OpensAt: now.Add(-48 * time.Hour),
 			ClosesAt: now.Add(5 * 24 * time.Hour), Status: "open", MaxEntriesUser: 100,
+			EntryTarget: target(store.DefaultEntryTarget),
+			Prizes: []store.CompetitionPrizeInput{
+				lvl("kish-island-dream-week", 10_000_000, 0),
+				lvl("amalfi-coast-escape", 5_000_000, 1),
+			},
 		},
 		{
-			Slug: "amalfi-week-01", PrizeID: prizeIDs["amalfi-coast-escape"],
-			Title: "Amalfi Coast Dream Week", TicketPriceCents: 300, Currency: "CAD",
+			Slug:  "amalfi-week-01",
+			Title: "Amalfi Coast Dream Week", Currency: "IRR",
 			BoardImage: board, OpensAt: now.Add(-24 * time.Hour),
 			ClosesAt: now.Add(9 * 24 * time.Hour), Status: "open", MaxEntriesUser: 100,
+			EntryTarget: target(store.DefaultEntryTarget),
+			Prizes: []store.CompetitionPrizeInput{
+				lvl("amalfi-coast-escape", 5_000_000, 0),
+			},
 		},
 		{
-			Slug: "alps-week-00", PrizeID: prizeIDs["swiss-alps-chalet"],
-			Title: "Swiss Alps Dream Week", TicketPriceCents: 300, Currency: "CAD",
+			Slug:  "alps-week-00",
+			Title: "Swiss Alps Dream Week", Currency: "IRR",
 			BoardImage: board, OpensAt: now.Add(-21 * 24 * time.Hour),
 			ClosesAt: now.Add(-14 * 24 * time.Hour), Status: "closed", MaxEntriesUser: 100,
+			EntryTarget: target(store.DefaultEntryTarget),
+			Prizes: []store.CompetitionPrizeInput{
+				lvl("swiss-alps-chalet", 8_000_000, 0),
+			},
 		},
 	}
 
@@ -210,6 +240,11 @@ func main() {
 			// مسابقهٔ بسته را موقتاً باز می‌کنیم تا بتوان ورودی ثبت کرد
 			_ = st.SetCompetitionStatus(ctx, id, "open")
 		}
+		levels, err := st.CompetitionPrizes(ctx, id, true)
+		if err != nil || len(levels) == 0 {
+			log.Printf("competition %s has no purchasable prize: %v", slug, err)
+			continue
+		}
 		for i, email := range players {
 			picks := []store.Point{}
 			for j := 0; j < 3; j++ {
@@ -218,8 +253,16 @@ func main() {
 					Y: 0.35 + float64((i*2+j)%11)*0.018,
 				})
 			}
+			// بازیکن‌ها بین سطوح موجود پخش می‌شوند تا دادهٔ نمونه هر دو حالت
+			// را داشته باشد: برنده‌ای که جایزهٔ گران انتخاب کرده و برنده‌ای که
+			// ارزان. همه در یک استخر رقابت می‌کنند.
+			lvl := levels[i%len(levels)]
 			if _, err := st.Checkout(ctx, users[email].ID,
-				[]store.CartLine{{CompetitionSlug: slug, Picks: picks}}, "mock", false); err != nil {
+				[]store.CartLine{{
+					CompetitionSlug:    slug,
+					CompetitionPrizeID: lvl.ID,
+					Picks:              picks,
+				}}, "mock", false); err != nil {
 				log.Printf("entries for %s/%s: %v", slug, email, err)
 			}
 		}

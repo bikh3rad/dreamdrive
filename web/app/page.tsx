@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, faNum, money, timeLeft, type Competition, type Winner } from "@/lib/api";
+import {
+  activeLevels, api, faNum, money, startingPrice, timeLeft,
+  type Competition, type Winner,
+} from "@/lib/api";
 import { FALLBACK_COMPETITIONS, FALLBACK_WINNERS } from "@/lib/fallback";
 import { CompetitionCard } from "@/components/CompetitionCard";
 import {
@@ -17,10 +20,12 @@ const STEPS = [
   { n: "۴", t: "منتظر رأی داوران بمان", d: "هیئت داوران مستقل پیش از بسته‌شدن، نقطهٔ خود را قفل می‌کند و پس از آن آشکار می‌شود." },
 ];
 
+// مبالغ به ریال — ریال زیرواحد ندارد، پس این اعداد خودِ ریال‌اند. اینها
+// نمونهٔ نمایشی‌اند؛ قیمت واقعی هر پیشنهاد از سطح جایزهٔ همان مسابقه می‌آید.
 const PACKS = [
-  { n: 1, price: 300, label: "تک پیشنهاد", note: "برای امتحان کردن" },
-  { n: 5, price: 1200, label: "بستهٔ پنج‌تایی", note: "محبوب‌ترین", best: true },
-  { n: 20, price: 4000, label: "بستهٔ بیست‌تایی", note: "بهترین ارزش" },
+  { n: 1, price: 5_000_000, label: "تک پیشنهاد", note: "برای امتحان کردن" },
+  { n: 5, price: 20_000_000, label: "بستهٔ پنج‌تایی", note: "محبوب‌ترین", best: true },
+  { n: 20, price: 70_000_000, label: "بستهٔ بیست‌تایی", note: "بهترین ارزش" },
 ];
 
 const TRUST = [
@@ -88,7 +93,7 @@ export default function HomePage() {
               {[
                 ["۱۸۴", "برندهٔ تاکنون"],
                 ["۹", "کشور اروپایی"],
-                ["CA$۳", "شروع از"],
+                [featured ? money(startingPrice(featured) ?? 0, featured.currency) : "—", "شروع از"],
               ].map(([v, l]) => (
                 <div key={l}>
                   <dt className="ltr-nums text-2xl font-black text-ink">{v}</dt>
@@ -121,9 +126,11 @@ export default function HomePage() {
                     <p className="mt-0.5 font-black text-ink">{timeLeft(featured.closes_at)}</p>
                   </div>
                   <div className="text-end">
-                    <p className="text-xs text-ink-muted">هر پیشنهاد</p>
+                    <p className="text-xs text-ink-muted">
+                      هر پیشنهاد {activeLevels(featured).length > 1 && "از"}
+                    </p>
                     <p className="ltr-nums mt-0.5 font-black text-brand-600">
-                      {money(featured.ticket_price_cents, featured.currency)}
+                      {money(startingPrice(featured) ?? 0, featured.currency)}
                     </p>
                   </div>
                   <Link href={`/play/${featured.slug}`} className="btn-primary !px-5 !py-2.5 text-sm">

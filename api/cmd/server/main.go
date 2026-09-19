@@ -71,7 +71,8 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// بستن خودکار مسابقاتی که مهلتشان تمام شده
+	// بستن خودکار مسابقه‌ها بر اساس دو شرط موازی: پایان مهلت، یا رسیدن به
+	// سقف تعداد حدس. هر کدام زودتر رخ دهد دوره را آمادهٔ داوری می‌کند.
 	stop := make(chan struct{})
 	go func() {
 		t := time.NewTicker(time.Minute)
@@ -84,6 +85,14 @@ func main() {
 					log.Printf("close expired: %v", err)
 				} else if n > 0 {
 					log.Printf("closed %d expired competition(s)", n)
+				}
+				// جدا از بالا اجرا می‌شود: اگر یکی خطا داد، دیگری نباید
+				// تا تیکِ بعدی معطل بماند.
+				n, err = st.CloseAtTarget(context.Background())
+				if err != nil {
+					log.Printf("close at target: %v", err)
+				} else if n > 0 {
+					log.Printf("closed %d competition(s) that reached their entry target", n)
 				}
 			case <-stop:
 				return

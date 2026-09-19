@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  api, faNum, money, timeLeft, ApiError,
+  activeLevels, api, faNum, money, startingPrice, timeLeft, ApiError,
   type Competition, type CompetitionResult, type JudgeStatus,
 } from "@/lib/api";
 import { FALLBACK_COMPETITIONS } from "@/lib/fallback";
@@ -49,6 +49,7 @@ export default function CompetitionPage({ params }: { params: { slug: string } }
 
   const open = c.status === "open";
   const settled = c.status === "settled" && result;
+  const levels = activeLevels(c);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
@@ -91,11 +92,85 @@ export default function CompetitionPage({ params }: { params: { slug: string } }
           <p className="mt-2 text-ink-muted">{c.prize?.subtitle}</p>
 
           <dl className="mt-7 grid grid-cols-2 gap-4">
-            <Cell label="هر پیشنهاد" value={money(c.ticket_price_cents, c.currency)} />
-            <Cell label="ارزش جایزه" value={c.prize ? money(c.prize.value_cents, c.currency) : "—"} />
+            <Cell
+              label={levels.length > 1 ? "هر پیشنهاد از" : "هر پیشنهاد"}
+              value={money(startingPrice(c) ?? 0, c.currency)}
+            />
+            <Cell label="ارزش جایزهٔ شاخص" value={c.prize ? money(c.prize.value_cents, c.currency) : "—"} />
             <Cell label="سقف هر کاربر" value={faNum(c.max_entries_user)} />
-            <Cell label="شرکت‌کننده‌ها" value={faNum((c.entry_count ?? 0).toLocaleString("en-US"))} />
+            <Cell
+              label="شرکت‌کننده‌ها"
+              value={
+                c.entry_target > 0
+                  ? `${faNum((c.entry_count ?? 0).toLocaleString("en-US"))} از ${faNum(c.entry_target.toLocaleString("en-US"))}`
+                  : faNum((c.entry_count ?? 0).toLocaleString("en-US"))
+              }
+            />
           </dl>
+
+          {/* ظرفیت دوره. نشان دادنش انتخاب عمدی است: شرکت‌کننده باید بداند
+              دقیقاً با چند نفر رقابت می‌کند و دوره کِی تمام می‌شود. */}
+          {c.entry_target > 0 && open && (
+            <div className="mt-5">
+              <div className="h-1.5 overflow-hidden rounded-full bg-ink/10">
+                <div
+                  className="h-full rounded-full bg-brand-500 transition-all"
+                  style={{
+                    width: `${Math.min(100, ((c.entry_count ?? 0) / c.entry_target) * 100)}%`,
+                  }}
+                />
+              </div>
+              <p className="mt-2 text-xs leading-6 text-ink-muted">
+                این دوره با رسیدن به{" "}
+                <span className="ltr-nums font-bold text-ink-soft">
+                  {faNum(c.entry_target.toLocaleString("en-US"))}
+                </span>{" "}
+                حدس بسته می‌شود و به داوری می‌رود — یا در{" "}
+                {new Date(c.closes_at).toLocaleDateString("fa-IR")}، هر کدام
+                زودتر برسد.
+              </p>
+            </div>
+          )}
+
+          {/* ---- سطوح جایزه ---- */}
+          {levels.length > 0 && (
+            <div className="mt-7">
+              <h2 className="text-sm font-black text-ink">
+                {levels.length > 1 ? "جایزه‌های این مسابقه" : "جایزهٔ این مسابقه"}
+              </h2>
+              <ul className="mt-3 space-y-2">
+                {levels.map((l) => (
+                  <li
+                    key={l.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-ink/[.10] p-3"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-bold text-ink">
+                        {l.prize?.title || "جایزه"}
+                      </span>
+                      {l.prize?.subtitle && (
+                        <span className="block truncate text-xs text-ink-muted">
+                          {l.prize.subtitle}
+                        </span>
+                      )}
+                    </span>
+                    <span className="ltr-nums shrink-0 text-sm font-black text-brand-600">
+                      {money(l.ticket_price_cents, c.currency)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {levels.length > 1 && (
+                <p className="mt-3 rounded-xl bg-canvas-alt px-3 py-2 text-xs leading-6 text-ink-soft">
+                  همهٔ شرکت‌کننده‌ها در یک رقابت واحد‌ند و شانس همه برابر است؛
+                  انتخاب جایزه فقط تعیین می‌کند قیمت هر پیشنهاد چقدر باشد و اگر
+                  برنده شدی چه چیزی تحویل بگیری. در هر دوره فقط{" "}
+                  <span className="font-black">یک برنده</span> و در نتیجه فقط یک
+                  جایزه اهدا می‌شود؛ جوایز دیگرِ همان دوره برنده ندارند.
+                </p>
+              )}
+            </div>
+          )}
 
           <Link
             href={`/play/${c.slug}`}
@@ -174,10 +249,25 @@ export default function CompetitionPage({ params }: { params: { slug: string } }
                 {result.winner_name || "برنده"}
               </h3>
               <dl className="mt-5 space-y-3 text-sm">
+                {result.awarded_title && (
+                  <Row k="جایزهٔ اهداشده" v={result.awarded_title} />
+                )}
                 <Row k="نقطهٔ نهایی داوران" v={`${result.final_x?.toFixed(4)} , ${result.final_y?.toFixed(4)}`} />
                 <Row k="فاصلهٔ پیشنهاد برنده" v={result.distance?.toFixed(5)} />
                 <Row k="تاریخ اعلام" v={new Date(result.decided_at).toLocaleDateString("fa-IR")} />
               </dl>
+
+              {/* نبودِ برنده برای سطوح دیگر حالت طبیعی است، نه نقص داده —
+                  اگر توضیح داده نشود، کاربرِ سطح دیگر فکر می‌کند نتیجه‌اش
+                  گم شده است. */}
+              {levels.length > 1 && (
+                <p className="mt-5 rounded-xl bg-canvas-alt px-3 py-2 text-xs leading-6 text-ink-soft">
+                  در این دوره تنها همین یک جایزه اهدا شد. بقیهٔ جوایز این
+                  مسابقه برنده‌ای نداشتند؛ برندهٔ هر دوره یک نفر است و جایزه‌اش
+                  همانی است که هنگام شرکت انتخاب کرده بود.
+                </p>
+              )}
+
               <p className="mt-5 flex items-start gap-2 text-xs leading-6 text-ink-muted">
                 <IconShield className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
                 زنجیرهٔ هش پیشنهادهای این مسابقه بررسی و سالم تأیید شد.

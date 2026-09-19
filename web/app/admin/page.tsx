@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, faNum, money, timeLeft, type Competition, type Stats } from "@/lib/api";
+import {
+  activeLevels, api, faNum, money, startingPrice, timeLeft,
+  type Competition, type Stats,
+} from "@/lib/api";
 import {
   PageHead, StatCard, Table, Empty, Badge, BarChart,
   statusLabel, statusTone,
@@ -117,9 +120,20 @@ export default function AdminDashboard() {
             <td className="px-4 py-3">
               <Badge tone={statusTone(c.status)}>{statusLabel(c.status)}</Badge>
             </td>
-            <td className="ltr-nums px-4 py-3 text-ink-soft">{money(c.ticket_price_cents, c.currency)}</td>
+            <td className="ltr-nums px-4 py-3 text-ink-soft">
+              {activeLevels(c).length > 1 && <span className="text-ink-muted">از </span>}
+              {money(startingPrice(c) ?? 0, c.currency)}
+            </td>
             <td className="px-4 py-3 text-ink-soft">{timeLeft(c.closes_at)}</td>
-            <td className="ltr-nums px-4 py-3 text-ink-soft">{faNum(c.entry_count ?? 0)}</td>
+            <td className="ltr-nums px-4 py-3 text-ink-soft">
+              {faNum((c.entry_count ?? 0).toLocaleString("en-US"))}
+              {c.entry_target > 0 && (
+                <span className="text-ink-muted">
+                  {" / "}
+                  {faNum(c.entry_target.toLocaleString("en-US"))}
+                </span>
+              )}
+            </td>
             <td className="px-4 py-3 text-end">
               <Link href="/admin/competitions" className="text-xs font-bold text-brand-600 hover:underline">
                 مدیریت

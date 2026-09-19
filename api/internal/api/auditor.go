@@ -77,7 +77,7 @@ func (s *Server) auditorPanel(w http.ResponseWriter, r *http.Request) {
 // auditorCompetitions فهرست مسابقه‌ها برای انتخاب در صفحهٔ ناظر.
 func (s *Server) auditorCompetitions(w http.ResponseWriter, r *http.Request) {
 	comps, err := s.St.ListCompetitions(r.Context(),
-		[]string{"draft", "open", "closed", "judging", "settled", "cancelled"}, true)
+		[]string{"draft", "open", "closed", "judging", "settled", "cancelled"}, true, true)
 	if err != nil {
 		httpx.Fail(w, 500, "could not load competitions")
 		return

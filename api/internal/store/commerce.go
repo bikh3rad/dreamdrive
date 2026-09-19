@@ -15,12 +15,30 @@ var (
 	ErrEntryLimit        = errors.New("entry limit reached for this competition")
 	ErrInsider           = errors.New("insiders may not enter competitions")
 	ErrBlocked           = errors.New("account is blocked")
+	// ErrTargetReached جدا از ErrEntryLimit است و نباید با آن یکی شود:
+	// آن یکی یعنی «سهم *تو* تمام شد»، این یعنی «ظرفیت *دوره* پر شد».
+	// پیام یکسان کاربر را به جستجوی اشتباه در حساب خودش می‌فرستد.
+	ErrTargetReached = errors.New("this competition has reached its entry target")
 )
 
-// CartLine یک قلم از سبد خرید: چند بلیط برای یک مسابقه، هر بلیط با مختصات خودش.
+var (
+	ErrPrizeUnavailable = errors.New("this prize is not available for sale")
+)
+
+// CartLine یک قلم از سبد خرید: چند بلیط برای *یک سطح جایزه*، هر بلیط با
+// مختصات خودش.
+//
+// کاربر می‌تواند در یک دوره چند قلم با جوایز مختلف داشته باشد؛ هر بلیط
+// مستقلاً به یک جایزه گره می‌خورد. مسابقه از روی خودِ سطح جایزه استخراج
+// می‌شود، نه از ورودی کاربر: اگر هر دو را از سمت مشتری می‌گرفتیم، می‌شد
+// سطحِ ارزانِ یک مسابقه را به مسابقهٔ دیگری چسباند.
+//
+// CompetitionSlug فقط برای پیام خطا و سازگاری فرانت است و هیچ‌جا مبنای
+// تصمیم نیست.
 type CartLine struct {
-	CompetitionSlug string  `json:"competition_slug"`
-	Picks           []Point `json:"picks"`
+	CompetitionSlug    string    `json:"competition_slug"`
+	CompetitionPrizeID uuid.UUID `json:"competition_prize_id"`
+	Picks              []Point   `json:"picks"`
 }
 
 type Point struct {
@@ -61,18 +79,43 @@ func (s *Store) Checkout(ctx context.Context, userID uuid.UUID, lines []CartLine
 
 	var total int64
 	type prepared struct {
-		comp  Competition
-		picks []Point
+		comp      Competition
+		level     CompetitionPrize
+		unitPrice int64
+		picks     []Point
 	}
 	preps := make([]prepared, 0, len(lines))
+	// سقف ورودی در سطح *مسابقه* است، نه سطح جایزه. اگر هر قلم جداگانه
+	// شمرده شود، کاربر با دو قلمِ دو جایزهٔ مختلف از یک مسابقه می‌تواند از
+	// سقف رد شود. پس تعداد بلیط‌های همین سبد را هم به شمارش اضافه می‌کنیم.
+	pending := map[uuid.UUID]int{}
 
 	for _, line := range lines {
 		if len(line.Picks) == 0 {
 			continue
 		}
+		if line.CompetitionPrizeID == uuid.Nil {
+			return res, errors.New("a prize must be chosen for every ticket")
+		}
+
+		// قیمت و مسابقه هر دو از خودِ ردیف سطح خوانده می‌شوند. قیمتی که
+		// مشتری فرستاده هیچ‌جا استفاده نمی‌شود — این تنها چیزی است که مانع
+		// خریدنِ جایزهٔ گران با قیمت ارزان می‌شود.
+		var lvl CompetitionPrize
+		if err := tx.QueryRow(ctx,
+			`SELECT `+cprizeCols+` FROM competition_prizes cp WHERE cp.id=$1`,
+			line.CompetitionPrizeID,
+		).Scan(&lvl.ID, &lvl.CompetitionID, &lvl.PrizeID, &lvl.TicketPriceCents,
+			&lvl.Sort, &lvl.IsActive, &lvl.CreatedAt); err != nil {
+			return res, norm(err)
+		}
+		if !lvl.IsActive {
+			return res, ErrPrizeUnavailable
+		}
+
 		// قفل سطر مسابقه تا شمارش ورودی‌ها در برابر رقابت همزمان امن بماند
 		var c Competition
-		r := tx.QueryRow(ctx, `SELECT `+compCols+` FROM competitions c WHERE c.slug=$1 FOR UPDATE`, line.CompetitionSlug)
+		r := tx.QueryRow(ctx, `SELECT `+compCols+` FROM competitions c WHERE c.id=$1 FOR UPDATE`, lvl.CompetitionID)
 		if c, err = scanComp(r); err != nil {
 			return res, norm(err)
 		}
@@ -87,17 +130,46 @@ func (s *Store) Checkout(ctx context.Context, userID uuid.UUID, lines []CartLine
 				c.ID, userID).Scan(&existing); err != nil {
 				return res, err
 			}
-			if existing+len(line.Picks) > c.MaxEntriesUser {
+			if existing+pending[c.ID]+len(line.Picks) > c.MaxEntriesUser {
 				return res, fmt.Errorf("%w: %s", ErrEntryLimit, c.Slug)
 			}
 		}
+		// سقف کل دوره. سطر مسابقه بالاتر FOR UPDATE قفل شده، پس دو خریدِ
+		// همزمان روی یک مسابقه پشت سر هم اجرا می‌شوند و نمی‌توانند هر دو
+		// آخرین صندلی را بفروشند.
+		//
+		// اینجا reservedEntries است نه countableEntries: صندلیِ سفارشِ
+		// pending هم اشغال است. با شمارشِ «فقط پرداخت‌شده»، حدس‌هایی که همین
+		// حالا فروخته شده‌اند برای خریدِ بعدی نامرئی می‌شدند و چون هیچ‌چیز
+		// سفارشِ pending را منقضی نمی‌کند، می‌شد با سبدهای پرداخت‌نشده بی‌صدا
+		// از سقف عبور کرد.
+		//
+		// عمداً سبدی که از سقف *رد* شود کامل رد می‌شود و نصفه فروخته نمی‌شود:
+		// فروش جزئی یعنی کاربر پول ده بلیط را می‌دهد و سه تا می‌گیرد، و
+		// آشتی‌دادن مبلغ سفارش با تعداد ورودی‌ها بعداً کابوس می‌شود.
+		if c.EntryTarget > 0 {
+			var totalEntries int
+			if err := tx.QueryRow(ctx,
+				fmt.Sprintf(`SELECT %s`, fmt.Sprintf(reservedEntries, "$1")),
+				c.ID).Scan(&totalEntries); err != nil {
+				return res, err
+			}
+			remaining := c.EntryTarget - totalEntries - pending[c.ID]
+			if remaining < 0 {
+				remaining = 0
+			}
+			if len(line.Picks) > remaining {
+				return res, fmt.Errorf("%w: %s (%d)", ErrTargetReached, c.Slug, remaining)
+			}
+		}
+		pending[c.ID] += len(line.Picks)
 		for _, p := range line.Picks {
 			if p.X < 0 || p.X > 1 || p.Y < 0 || p.Y > 1 {
 				return res, errors.New("coordinates must be normalised between 0 and 1")
 			}
 		}
-		total += c.TicketPriceCents * int64(len(line.Picks))
-		preps = append(preps, prepared{comp: c, picks: line.Picks})
+		total += lvl.TicketPriceCents * int64(len(line.Picks))
+		preps = append(preps, prepared{comp: c, level: lvl, unitPrice: lvl.TicketPriceCents, picks: line.Picks})
 	}
 	if len(preps) == 0 {
 		return res, errors.New("cart is empty")
@@ -134,13 +206,13 @@ func (s *Store) Checkout(ctx context.Context, userID uuid.UUID, lines []CartLine
 
 	for _, p := range preps {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO order_items (order_id, competition_id, qty, unit_price_cents)
-			 VALUES ($1,$2,$3,$4)`,
-			ord.ID, p.comp.ID, len(p.picks), p.comp.TicketPriceCents); err != nil {
+			`INSERT INTO order_items (order_id, competition_id, competition_prize_id, qty, unit_price_cents)
+			 VALUES ($1,$2,$3,$4,$5)`,
+			ord.ID, p.comp.ID, p.level.ID, len(p.picks), p.unitPrice); err != nil {
 			return res, err
 		}
 		for _, pick := range p.picks {
-			e, err := insertEntry(ctx, tx, userID, p.comp.ID, &ord.ID, pick.X, pick.Y, false)
+			e, err := insertEntry(ctx, tx, userID, p.comp.ID, p.level.ID, &ord.ID, pick.X, pick.Y, false, p.unitPrice)
 			if err != nil {
 				return res, err
 			}
@@ -155,6 +227,15 @@ func (s *Store) Checkout(ctx context.Context, userID uuid.UUID, lines []CartLine
 		}
 	}
 
+	// اگر همین سبد دوره را به سقف رساند، همین‌جا و در همان تراکنش بسته
+	// می‌شود. منتظر جارویِ دقیقه‌ای نمی‌مانیم چون در آن فاصله مسابقه هنوز
+	// «باز» است و خریدهای بعدی از سقف عبور می‌کنند.
+	for compID := range pending {
+		if err := closeIfTargetReached(ctx, tx, compID); err != nil {
+			return res, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return res, err
 	}
@@ -163,9 +244,40 @@ func (s *Store) Checkout(ctx context.Context, userID uuid.UUID, lines []CartLine
 	return res, nil
 }
 
+// closeIfTargetReached دوره را در همان تراکنش می‌بندد اگر تعداد حدس‌ها به
+// سقف رسیده باشد. باید پس از درج ورودی‌ها و روی سطر قفل‌شدهٔ مسابقه اجرا شود.
+//
+// شرط status='open' در خود UPDATE است نه در Go: اگر همزمان ادمین وضعیت را
+// عوض کرده باشد، نباید تصمیم را روی نسخهٔ کهنه‌ای که در حافظه داریم بگیریم.
+//
+// شرط EXISTS روی judge_commits عمداً اینجا هم هست و با CloseAtTarget یکی است:
+// Commit فقط در وضعیت open/draft مجاز است، پس بستنِ دوره‌ای که هنوز هیچ
+// تعهدی ندارد آن را در بن‌بست می‌گذارد — نه داور می‌تواند تعهد بدهد، نه
+// Settle اجرا می‌شود (ErrNoCommits). در آن حالت دوره باز می‌ماند تا پنل
+// تعهدش را ثبت کند یا closes_at برسد.
+func closeIfTargetReached(ctx context.Context, tx pgx.Tx, compID uuid.UUID) error {
+	_, err := tx.Exec(ctx, fmt.Sprintf(
+		`UPDATE competitions c SET status='closed'
+		 WHERE c.id=$1 AND c.status='open' AND c.entry_target > 0
+		   AND %s >= c.entry_target
+		   AND EXISTS (SELECT 1 FROM judge_commits jc WHERE jc.competition_id = c.id)`,
+		fmt.Sprintf(countableEntries, "c.id")),
+		compID)
+	return err
+}
+
 // insertEntry ورودی را با زنجیرهٔ هش (prev_hash → hash) ثبت می‌کند تا دستکاریِ
 // گذشته قابل تشخیص باشد. باید داخل تراکنشی اجرا شود که سطر مسابقه را قفل کرده است.
-func insertEntry(ctx context.Context, tx pgx.Tx, userID, compID uuid.UUID, orderID *uuid.UUID, x, y float64, free bool) (Entry, error) {
+//
+// زنجیره در سطح *مسابقه* است و با چند جایزه‌شدن تغییر نمی‌کند: همهٔ بلیط‌ها
+// در یک استخر واحد و یک ترتیب seq قرار دارند، فارغ از اینکه کدام جایزه را
+// انتخاب کرده‌اند. فرمول هش هم عمداً دست‌نخورده می‌ماند تا ورودی‌های پیش از
+// مهاجرت 0004 همچنان قابل راستی‌آزمایی باشند؛ محافظت از پیوند بلیط↔جایزه
+// به‌جای هش با تریگر «تغییرناپذیری» در همان مهاجرت انجام می‌شود.
+// paidPrice بهای واقعیِ همین بلیط است و در ستون paid_price_cents تثبیت
+// می‌شود: پاداش نزدیک‌ترین حدس نباید بعداً قیمت *امروزِ* سطح را بخواند، چون
+// ادمین ممکن است قیمت را بین ثبت حدس و تسویه عوض کرده باشد. ورود رایگان ۰.
+func insertEntry(ctx context.Context, tx pgx.Tx, userID, compID, cprizeID uuid.UUID, orderID *uuid.UUID, x, y float64, free bool, paidPrice int64) (Entry, error) {
 	var e Entry
 	var seq int64
 	var prevHash string
@@ -182,30 +294,98 @@ func insertEntry(ctx context.Context, tx pgx.Tx, userID, compID uuid.UUID, order
 	h := EntryHash(prevHash, id, userID, compID, x, y, createdAt)
 
 	err = tx.QueryRow(ctx,
-		`INSERT INTO entries (id, user_id, competition_id, order_id, x, y, is_free_entry, seq, prev_hash, hash, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		 RETURNING id, user_id, competition_id, x, y, is_free_entry, seq, hash, created_at`,
-		id, userID, compID, orderID, x, y, free, seq, prevHash, h, createdAt,
-	).Scan(&e.ID, &e.UserID, &e.CompetitionID, &e.X, &e.Y, &e.IsFreeEntry, &e.Seq, &e.Hash, &e.CreatedAt)
+		`INSERT INTO entries (id, user_id, competition_id, competition_prize_id, order_id,
+		     x, y, is_free_entry, seq, prev_hash, hash, created_at, paid_price_cents)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		 RETURNING id, user_id, competition_id, competition_prize_id, x, y, is_free_entry, seq, hash, created_at`,
+		id, userID, compID, cprizeID, orderID, x, y, free, seq, prevHash, h, createdAt, paidPrice,
+	).Scan(&e.ID, &e.UserID, &e.CompetitionID, &e.CompetitionPrizeID, &e.X, &e.Y,
+		&e.IsFreeEntry, &e.Seq, &e.Hash, &e.CreatedAt)
 	return e, err
 }
 
 // FreeEntry مسیر ورود رایگان (سپر حقوقی) — بدون سفارش، محدود به یک بار در هفته.
-func (s *Store) FreeEntry(ctx context.Context, userID uuid.UUID, slug string, x, y float64) (Entry, error) {
+//
+// شرکت‌کنندهٔ رایگان هم مثل خریدار پولی جایزه‌اش را خودش انتخاب می‌کند. این
+// نکتهٔ حقوقی است، نه امکانات اضافه: اگر مسیر رایگان فقط ارزان‌ترین جایزه را
+// می‌داد، دیگر «معادل واقعی» مسیر پولی نبود و همان سپر را از دست می‌دادیم.
+func (s *Store) FreeEntry(ctx context.Context, userID uuid.UUID, slug string, cprizeID uuid.UUID, x, y float64) (Entry, error) {
 	var e Entry
+	if cprizeID == uuid.Nil {
+		return e, errors.New("a prize must be chosen for every ticket")
+	}
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return e, err
 	}
 	defer tx.Rollback(ctx)
 
+	// همان بررسی‌هایی که Checkout روی حساب کاربر می‌کند. نبودشان یعنی حساب
+	// مسدود یا کارمند داخلی که از مسیر پولی رد می‌شود، از مسیر رایگان وارد
+	// همان استخر می‌شد — و استخر یکی است، پس همان یک برنده را می‌توانست ببرد.
+	var user User
+	if user, err = scanUser(tx.QueryRow(ctx,
+		`SELECT `+userCols+` FROM users WHERE id=$1 FOR UPDATE`, userID)); err != nil {
+		return e, norm(err)
+	}
+	if user.IsBlocked {
+		return e, ErrBlocked
+	}
+	if user.IsInsider {
+		return e, ErrInsider
+	}
+
 	c, err := scanComp(tx.QueryRow(ctx, `SELECT `+compCols+` FROM competitions c WHERE c.slug=$1 FOR UPDATE`, slug))
 	if err != nil {
 		return e, norm(err)
 	}
-	if c.Status != "open" {
+	// بازهٔ زمانی هم مثل مسیر پولی بررسی می‌شود. پیش از این فقط وضعیت چک
+	// می‌شد، یعنی در فاصلهٔ گذشتنِ closes_at تا اجرای جارویِ دقیقه‌ای، مسیر
+	// رایگان هنوز ورودی می‌پذیرفت.
+	now := time.Now()
+	if c.Status != "open" || now.Before(c.OpensAt) || now.After(c.ClosesAt) {
 		return e, ErrCompetitionClosed
 	}
+	// سقف کل دوره؛ ورودی رایگان هم در همان استخر شمرده می‌شود. مثل گیت خرید،
+	// مبنا صندلیِ *رزروشده* است تا سبدهای pending دو بار فروخته نشوند.
+	if c.EntryTarget > 0 {
+		var totalEntries int
+		if err := tx.QueryRow(ctx,
+			fmt.Sprintf(`SELECT %s`, fmt.Sprintf(reservedEntries, "$1")),
+			c.ID).Scan(&totalEntries); err != nil {
+			return e, err
+		}
+		if totalEntries >= c.EntryTarget {
+			return e, ErrTargetReached
+		}
+	}
+	// سقف هر کاربر. مسیر رایگان خودش «یک بار در هر مسابقه» را محدود می‌کند،
+	// ولی اگر ادمین سقف را ۰ گذاشته باشد یعنی کاربر اصلاً نباید ورودی داشته
+	// باشد و آن قاعده باید اینجا هم اعمال شود.
+	if c.MaxEntriesUser > 0 {
+		var existing int
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM entries WHERE competition_id=$1 AND user_id=$2`,
+			c.ID, userID).Scan(&existing); err != nil {
+			return e, err
+		}
+		if existing >= c.MaxEntriesUser {
+			return e, ErrEntryLimit
+		}
+	}
+
+	// سطح جایزه باید *مال همین مسابقه* باشد، وگرنه می‌شد با ورود رایگانِ یک
+	// مسابقهٔ بی‌ارزش، بلیط جایزهٔ گران مسابقهٔ دیگر را گرفت.
+	var lvlActive bool
+	if err := tx.QueryRow(ctx,
+		`SELECT is_active FROM competition_prizes WHERE id=$1 AND competition_id=$2`,
+		cprizeID, c.ID).Scan(&lvlActive); err != nil {
+		return e, norm(err)
+	}
+	if !lvlActive {
+		return e, ErrPrizeUnavailable
+	}
+
 	var used int
 	if err := tx.QueryRow(ctx,
 		`SELECT count(*) FROM entries WHERE user_id=$1 AND competition_id=$2 AND is_free_entry`,
@@ -215,7 +395,10 @@ func (s *Store) FreeEntry(ctx context.Context, userID uuid.UUID, slug string, x,
 	if used > 0 {
 		return e, errors.New("free entry already used for this competition")
 	}
-	if e, err = insertEntry(ctx, tx, userID, c.ID, nil, x, y, true); err != nil {
+	if e, err = insertEntry(ctx, tx, userID, c.ID, cprizeID, nil, x, y, true, 0); err != nil {
+		return e, err
+	}
+	if err := closeIfTargetReached(ctx, tx, c.ID); err != nil {
 		return e, err
 	}
 	e.CompetitionSlug = c.Slug
@@ -223,17 +406,63 @@ func (s *Store) FreeEntry(ctx context.Context, userID uuid.UUID, slug string, x,
 }
 
 // MarkOrderPaid وب‌هوک درگاه پرداخت.
+// MarkOrderPaid سفارش را پرداخت‌شده می‌کند و سپس دوره‌های همان سفارش را برای
+// رسیدن به سقف بررسی می‌کند.
+//
+// این بررسی اینجا حیاتی است و جای دیگری نمی‌تواند باشد: حدس‌ها هنگام Checkout
+// درج می‌شوند ولی تا وقتی سفارش pending است «قطعی» نیستند، پس بستنِ
+// درون‌تراکنشیِ Checkout هرگز با سبدِ خودش فعال نمی‌شود. لحظه‌ای که یک حدس
+// قطعی می‌شود دقیقاً همین‌جاست. بدون این، بستنِ دوره تا جاروی دقیقه‌ای عقب
+// می‌افتاد و در آن فاصله مسابقه هنوز باز بود.
+//
+// تراکنش لازم است تا قطعی‌شدن سفارش و بسته‌شدن دوره یک واحد اتمیک باشند.
 func (s *Store) MarkOrderPaid(ctx context.Context, orderID uuid.UUID, providerRef string) error {
-	tag, err := s.DB.Exec(ctx,
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx,
 		`UPDATE orders SET status='paid', paid_at=now(), provider_ref=$2
 		 WHERE id=$1 AND status='pending'`, orderID, providerRef)
 	if err != nil {
 		return err
 	}
+	// صفر یعنی سفارش نبود یا قبلاً pending نبوده. idempotent می‌ماند: وبهوکِ
+	// تکراری نباید دوباره بستن را اجرا کند.
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+
+	// ترتیبِ ثابت بر اساس شناسهٔ مسابقه تا دو وبهوکِ همزمان که مسابقه‌های
+	// مشترک دارند قفل‌ها را در یک جهت بگیرند و بن‌بست نسازند.
+	rows, err := tx.Query(ctx,
+		`SELECT DISTINCT competition_id FROM order_items WHERE order_id=$1
+		 ORDER BY competition_id`, orderID)
+	if err != nil {
+		return err
+	}
+	var comps []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		comps = append(comps, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, compID := range comps {
+		if err := closeIfTargetReached(ctx, tx, compID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) RefundOrder(ctx context.Context, orderID uuid.UUID) error {
@@ -299,8 +528,12 @@ func (s *Store) ListOrders(ctx context.Context, f OrderFilter) ([]Order, int64, 
 	}
 
 	irows, err := s.DB.Query(ctx,
-		`SELECT oi.order_id, oi.id, oi.competition_id, c.slug, c.title, oi.qty, oi.unit_price_cents
-		 FROM order_items oi JOIN competitions c ON c.id=oi.competition_id
+		`SELECT oi.order_id, oi.id, oi.competition_id, c.slug, c.title,
+		        oi.competition_prize_id, COALESCE(p.title,''), oi.qty, oi.unit_price_cents
+		 FROM order_items oi
+		 JOIN competitions c ON c.id=oi.competition_id
+		 LEFT JOIN competition_prizes cp ON cp.id=oi.competition_prize_id
+		 LEFT JOIN prizes p ON p.id=cp.prize_id
 		 WHERE oi.order_id = ANY($1)`, ids)
 	if err != nil {
 		return nil, 0, err
@@ -311,7 +544,8 @@ func (s *Store) ListOrders(ctx context.Context, f OrderFilter) ([]Order, int64, 
 		var oid uuid.UUID
 		var it OrderItem
 		if err := irows.Scan(&oid, &it.ID, &it.CompetitionID, &it.CompetitionSlug,
-			&it.Title, &it.Qty, &it.UnitPriceCents); err != nil {
+			&it.Title, &it.CompetitionPrizeID, &it.PrizeTitle,
+			&it.Qty, &it.UnitPriceCents); err != nil {
 			return nil, 0, err
 		}
 		byOrder[oid] = append(byOrder[oid], it)

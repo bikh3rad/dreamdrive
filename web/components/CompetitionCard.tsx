@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { faNum, money, timeLeft, type Competition } from "@/lib/api";
+import { activeLevels, faNum, money, startingPrice, timeLeft, type Competition } from "@/lib/api";
 import { IconTicket, IconCalendar } from "./icons";
 
 export function CompetitionCard({ c }: { c: Competition }) {
@@ -35,21 +35,44 @@ export function CompetitionCard({ c }: { c: Competition }) {
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-muted">
           <span className="flex items-center gap-1.5">
             <IconTicket className="h-4 w-4" />
+            {/* چند سطح قیمت ممکن است؛ ارزان‌ترین را با «از» نشان می‌دهیم. */}
+            {activeLevels(c).length > 1 && <span>از</span>}
             <span className="ltr-nums font-bold text-ink">
-              {money(c.ticket_price_cents, c.currency)}
+              {money(startingPrice(c) ?? 0, c.currency)}
             </span>
             هر پیشنهاد
           </span>
-          {typeof c.entry_count === "number" && (
+          {/* entry_count با omitempty می‌آید، پس دورهٔ بدون حدس اصلاً فیلد را
+              ندارد. بدون شرط دوم، نوار ظرفیتِ پایین بدون هیچ برچسبی نمایش
+              داده می‌شد و شبیه خرابی رندر دیده می‌شد. */}
+          {(typeof c.entry_count === "number" || c.entry_target > 0) && (
             <span className="flex items-center gap-1.5">
               <IconCalendar className="h-4 w-4" />
               <span className="ltr-nums font-bold text-ink">
-                {faNum(c.entry_count.toLocaleString("en-US"))}
+                {faNum((c.entry_count ?? 0).toLocaleString("en-US"))}
               </span>
+              {c.entry_target > 0 ? (
+                <span className="ltr-nums">
+                  / {faNum(c.entry_target.toLocaleString("en-US"))}
+                </span>
+              ) : null}
               شرکت
             </span>
           )}
         </div>
+
+        {/* نوار ظرفیت دوره — فقط وقتی سقف تعریف شده و مسابقه هنوز باز است.
+            روی مسابقهٔ بسته معنایی ندارد و فقط شلوغی می‌سازد. */}
+        {c.entry_target > 0 && !closed && (
+          <div className="mt-3 h-1 overflow-hidden rounded-full bg-ink/10">
+            <div
+              className="h-full rounded-full bg-brand-500"
+              style={{
+                width: `${Math.min(100, ((c.entry_count ?? 0) / c.entry_target) * 100)}%`,
+              }}
+            />
+          </div>
+        )}
 
         <div className="mt-5 flex gap-2">
           <Link href={`/play/${c.slug}`} className="btn-primary flex-1 !py-2.5 text-sm">

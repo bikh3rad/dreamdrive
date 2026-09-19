@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api, money, ApiError } from "@/lib/api";
 import { PageHead } from "@/components/admin/ui";
 import { Logo } from "@/components/icons";
 import { ImagePicker } from "@/components/admin/ImagePicker";
@@ -19,10 +19,11 @@ const DEFAULTS: S = {
   hero_image: "",
   near_miss_threshold: 0.05,
   near_miss_max_percent: 100,
+  // مبالغ به ریال‌اند (ریال زیرواحد ندارد)، نه سنت.
   packs: [
-    { entries: 1, price_cents: 300 },
-    { entries: 5, price_cents: 1200 },
-    { entries: 20, price_cents: 4000 },
+    { entries: 1, price_cents: 5_000_000 },
+    { entries: 5, price_cents: 20_000_000 },
+    { entries: 20, price_cents: 70_000_000 },
   ],
   min_age: 18,
   maintenance: false,
@@ -150,7 +151,7 @@ export default function SettingsPage() {
                         />
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs text-ink-muted">قیمت (سنت)</label>
+                        <label className="mb-1 block text-xs text-ink-muted">قیمت (ریال)</label>
                         <input
                           className="field text-start" dir="ltr" type="number" value={p.price_cents}
                           onChange={(e) => setPack(i, "price_cents", Number(e.target.value))}
@@ -166,7 +167,7 @@ export default function SettingsPage() {
                   ))}
                 </div>
                 <button
-                  onClick={() => set("packs", [...packs, { entries: 1, price_cents: 300 }])}
+                  onClick={() => set("packs", [...packs, { entries: 1, price_cents: 5_000_000 }])}
                   className="btn-ghost mt-3 !py-2 !px-4 text-xs"
                 >
                   افزودن بسته
@@ -288,7 +289,7 @@ export default function SettingsPage() {
                   className="ltr-nums flex-1 rounded-xl bg-white p-3 text-center text-[11px]"
                   style={{ color: s.color_ink }}
                 >
-                  <p className="font-black">{(p.price_cents / 100).toFixed(2)}</p>
+                  <p className="font-black">{money(p.price_cents)}</p>
                   <p className="mt-0.5 opacity-60">{p.entries}×</p>
                 </div>
               ))}

@@ -50,9 +50,18 @@ function OrderView({ id }: { id: string }) {
             {order.items && order.items.length > 0 && (
               <div className="mt-6 divide-y divide-ink/[.07] border-t border-ink/[.07] pt-2">
                 {order.items.map((it, i) => (
-                  <div key={i} className="flex items-center justify-between py-3 text-sm">
-                    <span className="text-ink">{it.title || it.competition_slug}</span>
-                    <span className="ltr-nums text-ink-muted">
+                  <div key={i} className="flex items-center justify-between gap-3 py-3 text-sm">
+                    <span className="min-w-0">
+                      <span className="block truncate text-ink">
+                        {it.title || it.competition_slug}
+                      </span>
+                      {it.prize_title && (
+                        <span className="block truncate text-xs font-bold text-brand-700">
+                          {it.prize_title}
+                        </span>
+                      )}
+                    </span>
+                    <span className="ltr-nums shrink-0 text-ink-muted">
                       {faNum(it.qty)} × {money(it.unit_price_cents, order.currency)}
                     </span>
                   </div>

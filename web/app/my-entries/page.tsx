@@ -83,8 +83,17 @@ export default function MyEntriesPage() {
                     <span className="ltr-nums w-10 shrink-0 text-xs font-bold text-ink-muted">
                       #{faNum(e.seq)}
                     </span>
-                    <span className="ltr-nums flex-1 font-bold text-ink">
-                      {e.x.toFixed(4)} , {e.y.toFixed(4)}
+                    <span className="min-w-0 flex-1">
+                      <span className="ltr-nums block font-bold text-ink">
+                        {e.x.toFixed(4)} , {e.y.toFixed(4)}
+                      </span>
+                      {/* در یک مسابقه می‌توان چند حدس با جوایز مختلف داشت؛
+                          بدون این برچسب معلوم نیست کدام حدس برای کدام جایزه بود. */}
+                      {e.prize_title && (
+                        <span className="block truncate text-xs text-ink-muted">
+                          {e.prize_title}
+                        </span>
+                      )}
                     </span>
                     {e.is_free_entry && (
                       <span className="chip bg-brand-50 text-brand-700">رایگان</span>

@@ -223,32 +223,46 @@ func (s *Store) Settle(ctx context.Context, compID uuid.UUID) (Result, error) {
 		return res, err
 	}
 
-	var winnerEntry, winnerUser *uuid.UUID
+	// یک استخر، یک برنده. انتخابِ جایزه روی این رقابت هیچ اثری ندارد —
+	// نه شانس را تغییر می‌دهد نه ترتیب را. فقط تعیین می‌کند اگر این ورودی
+	// برنده شد چه چیزی تحویل داده می‌شود.
+	//
+	// فقط حدس‌های *قطعی* (رایگان یا پرداخت‌شده) در استخر برنده‌اند. بدون این
+	// شرط، سفارشِ pending — که هیچ پولی برایش پرداخت نشده و هیچ‌چیز هم
+	// منقضی‌اش نمی‌کند — می‌توانست ویلا را ببرد: کافی بود کسی پیش از تسویه
+	// سبدهای پرداخت‌نشدهٔ انبوه بزند. سفارشِ refunded هم همین‌طور؛ کسی که پولش
+	// را پس گرفته نباید در قرعه بماند.
+	var winnerEntry, winnerUser, awardedPrize *uuid.UUID
 	var distance float64
-	var eID, uID uuid.UUID
+	var eID, uID, cpID uuid.UUID
 	err = tx.QueryRow(ctx,
-		`SELECT id, user_id, sqrt(power(x-$2,2) + power(y-$3,2)) AS d
-		 FROM entries WHERE competition_id=$1
-		 ORDER BY d ASC, seq ASC LIMIT 1`, compID, fx, fy).Scan(&eID, &uID, &distance)
+		`SELECT e.id, e.user_id, e.competition_prize_id,
+		        sqrt(power(e.x-$2,2) + power(e.y-$3,2)) AS d
+		 FROM entries e WHERE e.competition_id=$1 AND `+countableEntryPredicate+`
+		 ORDER BY d ASC, e.seq ASC LIMIT 1`, compID, fx, fy).Scan(&eID, &uID, &cpID, &distance)
 	switch {
 	case err == nil:
-		winnerEntry, winnerUser = &eID, &uID
+		winnerEntry, winnerUser, awardedPrize = &eID, &uID, &cpID
 	case errors.Is(err, pgx.ErrNoRows):
 		// مسابقه بدون هیچ ورودی — نتیجه ثبت می‌شود ولی برنده‌ای نیست
 	default:
 		return res, err
 	}
 
+	// awarded_prize_id از خودِ ورودیِ برنده می‌آید، نه از محاسبه‌ای جدا؛
+	// هر منبع دیگری می‌توانست با چیزی که کاربر خریده اختلاف پیدا کند.
+	// باقی جوایز این دوره برنده ندارند و این حالت طبیعی است.
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO results (competition_id, final_x, final_y, winner_entry_id, winner_user_id, distance)
-		 VALUES ($1,$2,$3,$4,$5,$6)
+		`INSERT INTO results (competition_id, final_x, final_y, winner_entry_id, winner_user_id, awarded_prize_id, distance)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)
 		 ON CONFLICT (competition_id) DO UPDATE SET final_x=EXCLUDED.final_x, final_y=EXCLUDED.final_y,
 		     winner_entry_id=EXCLUDED.winner_entry_id, winner_user_id=EXCLUDED.winner_user_id,
+		     awarded_prize_id=EXCLUDED.awarded_prize_id,
 		     distance=EXCLUDED.distance, decided_at=now()
-		 RETURNING competition_id, final_x, final_y, winner_entry_id, winner_user_id, distance, video_url, decided_at`,
-		compID, fx, fy, winnerEntry, winnerUser, distance,
+		 RETURNING competition_id, final_x, final_y, winner_entry_id, winner_user_id, awarded_prize_id, distance, video_url, decided_at`,
+		compID, fx, fy, winnerEntry, winnerUser, awardedPrize, distance,
 	).Scan(&res.CompetitionID, &res.FinalX, &res.FinalY, &res.WinnerEntryID,
-		&res.WinnerUserID, &res.Distance, &res.VideoURL, &res.DecidedAt); err != nil {
+		&res.WinnerUserID, &res.AwardedPrizeID, &res.Distance, &res.VideoURL, &res.DecidedAt); err != nil {
 		return res, err
 	}
 
@@ -256,8 +270,10 @@ func (s *Store) Settle(ctx context.Context, compID uuid.UUID) (Result, error) {
 		return res, err
 	}
 
-	// پاداش near-miss: تا ۱۰۰٪ قیمت بلیط اعتبار، به نسبت نزدیکیِ ورودی
-	if err := awardNearMiss(ctx, tx, compID, fx, fy, c.TicketPriceCents); err != nil {
+	// پاداش near-miss: تا ۱۰۰٪ قیمت بلیط اعتبار، به نسبت نزدیکیِ ورودی.
+	// قیمت هر ورودی از سطح جایزهٔ خودش خوانده می‌شود، نه یک قیمت واحد؛
+	// وگرنه خریدار بلیط ارزان بیش از آنچه پرداخته اعتبار می‌گرفت.
+	if err := awardNearMiss(ctx, tx, compID, fx, fy); err != nil {
 		return res, err
 	}
 
@@ -273,19 +289,30 @@ func (s *Store) Settle(ctx context.Context, compID uuid.UUID) (Result, error) {
 }
 
 // awardNearMiss به ورودی‌هایی که فاصله‌شان کمتر از آستانه است اعتبار می‌دهد.
-func awardNearMiss(ctx context.Context, tx pgx.Tx, compID uuid.UUID, fx, fy float64, ticketPrice int64) error {
+//
+// مبنا بهای *پرداخت‌شدهٔ همان بلیط* است (entries.paid_price_cents)، نه قیمت
+// امروزِ سطح جایزه: قیمت سطح قابل ویرایش است و اگر ادمین آن را بین ثبت حدس و
+// تسویه بالا ببرد، پاداش بر اساس مبلغی حساب می‌شد که کاربر هرگز نپرداخته.
+//
+// ورودی رایگان صفر می‌گیرد: چیزی نپرداخته که بخشی از آن برگردد، و در غیر این
+// صورت مسیر رایگان به یک کانال درآمد تبدیل می‌شد — کسی که هفته‌ها ورودی
+// رایگان بزند بدون هیچ پرداختی اعتبار جمع می‌کرد.
+func awardNearMiss(ctx context.Context, tx pgx.Tx, compID uuid.UUID, fx, fy float64) error {
 	const threshold = 0.05 // ۵٪ قطر تصویر
 	_, err := tx.Exec(ctx,
 		`WITH near AS (
-		   SELECT user_id, sqrt(power(x-$2,2)+power(y-$3,2)) AS d
-		   FROM entries WHERE competition_id=$1
+		   SELECT e.user_id,
+		          CASE WHEN e.is_free_entry THEN 0 ELSE e.paid_price_cents END AS price,
+		          sqrt(power(e.x-$2,2)+power(e.y-$3,2)) AS d
+		   FROM entries e
+		   WHERE e.competition_id=$1 AND `+countableEntryPredicate+`
 		 ), credited AS (
-		   SELECT user_id, sum(round($4 * (1 - d/$5))::bigint) AS cents
-		   FROM near WHERE d < $5 GROUP BY user_id
+		   SELECT user_id, sum(round(price * (1 - d/$4))::bigint) AS cents
+		   FROM near WHERE d < $4 GROUP BY user_id
 		 )
 		 UPDATE users u SET credit_cents = u.credit_cents + c.cents
 		 FROM credited c WHERE u.id = c.user_id AND c.cents > 0`,
-		compID, fx, fy, ticketPrice, threshold)
+		compID, fx, fy, threshold)
 	return err
 }
 
@@ -295,11 +322,16 @@ func (s *Store) ResultFor(ctx context.Context, compID uuid.UUID) (Result, error)
 		`SELECT r.competition_id, r.final_x, r.final_y, r.winner_entry_id, r.winner_user_id,
 		        COALESCE(u.email,''),
 		        COALESCE(NULLIF(u.full_name,''), 'برندهٔ تأییدشده'),
+		        r.awarded_prize_id, COALESCE(p.title,''),
 		        r.distance, r.video_url, r.decided_at
-		 FROM results r LEFT JOIN users u ON u.id=r.winner_user_id
+		 FROM results r
+		 LEFT JOIN users u ON u.id=r.winner_user_id
+		 LEFT JOIN competition_prizes cp ON cp.id=r.awarded_prize_id
+		 LEFT JOIN prizes p ON p.id=cp.prize_id
 		 WHERE r.competition_id=$1`, compID).
 		Scan(&r.CompetitionID, &r.FinalX, &r.FinalY, &r.WinnerEntryID, &r.WinnerUserID,
-			&r.WinnerEmail, &r.WinnerName, &r.Distance, &r.VideoURL, &r.DecidedAt)
+			&r.WinnerEmail, &r.WinnerName, &r.AwardedPrizeID, &r.AwardedTitle,
+			&r.Distance, &r.VideoURL, &r.DecidedAt)
 	return r, norm(err)
 }
 
@@ -352,8 +384,12 @@ func (s *Store) ListEntries(ctx context.Context, compID uuid.UUID, limit int) ([
 		limit = 200
 	}
 	rows, err := s.DB.Query(ctx,
-		`SELECT id, user_id, competition_id, x, y, is_free_entry, seq, hash, created_at
-		 FROM entries WHERE competition_id=$1 ORDER BY seq LIMIT $2`, compID, limit)
+		`SELECT e.id, e.user_id, e.competition_id, e.competition_prize_id, COALESCE(p.title,''),
+		        e.x, e.y, e.is_free_entry, e.seq, e.hash, e.created_at
+		 FROM entries e
+		 LEFT JOIN competition_prizes cp ON cp.id=e.competition_prize_id
+		 LEFT JOIN prizes p ON p.id=cp.prize_id
+		 WHERE e.competition_id=$1 ORDER BY e.seq LIMIT $2`, compID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -363,8 +399,12 @@ func (s *Store) ListEntries(ctx context.Context, compID uuid.UUID, limit int) ([
 
 func (s *Store) EntriesForUser(ctx context.Context, userID uuid.UUID) ([]Entry, error) {
 	rows, err := s.DB.Query(ctx,
-		`SELECT e.id, e.user_id, e.competition_id, e.x, e.y, e.is_free_entry, e.seq, e.hash, e.created_at, c.slug
-		 FROM entries e JOIN competitions c ON c.id=e.competition_id
+		`SELECT e.id, e.user_id, e.competition_id, e.competition_prize_id, COALESCE(p.title,''),
+		        e.x, e.y, e.is_free_entry, e.seq, e.hash, e.created_at, c.slug
+		 FROM entries e
+		 JOIN competitions c ON c.id=e.competition_id
+		 LEFT JOIN competition_prizes cp ON cp.id=e.competition_prize_id
+		 LEFT JOIN prizes p ON p.id=cp.prize_id
 		 WHERE e.user_id=$1 ORDER BY e.created_at DESC LIMIT 500`, userID)
 	if err != nil {
 		return nil, err
@@ -373,7 +413,8 @@ func (s *Store) EntriesForUser(ctx context.Context, userID uuid.UUID) ([]Entry, 
 	out := []Entry{}
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.ID, &e.UserID, &e.CompetitionID, &e.X, &e.Y,
+		if err := rows.Scan(&e.ID, &e.UserID, &e.CompetitionID, &e.CompetitionPrizeID,
+			&e.PrizeTitle, &e.X, &e.Y,
 			&e.IsFreeEntry, &e.Seq, &e.Hash, &e.CreatedAt, &e.CompetitionSlug); err != nil {
 			return nil, err
 		}
@@ -392,7 +433,8 @@ func scanEntries(rows rowScanner) ([]Entry, error) {
 	out := []Entry{}
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.ID, &e.UserID, &e.CompetitionID, &e.X, &e.Y,
+		if err := rows.Scan(&e.ID, &e.UserID, &e.CompetitionID, &e.CompetitionPrizeID,
+			&e.PrizeTitle, &e.X, &e.Y,
 			&e.IsFreeEntry, &e.Seq, &e.Hash, &e.CreatedAt); err != nil {
 			return nil, err
 		}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, money, ApiError, type Prize } from "@/lib/api";
+import { api, money, toman, ApiError, type Prize } from "@/lib/api";
 import { PageHead, Table, Empty, Modal } from "@/components/admin/ui";
 import { ImagePicker } from "@/components/admin/ImagePicker";
 
@@ -67,14 +67,17 @@ export default function PrizesPage() {
     catch (e) { alert(e instanceof ApiError ? e.message : "حذف ناموفق بود."); }
   };
 
+  // ×۱۰۰ نداریم: ریال زیرواحد ندارد و value_cents خودِ ریال است. ضرب قبلی
+  // ارزش جایزه را صد برابر در دیتابیس می‌نشاند و در صفحهٔ عمومی هم صد برابر
+  // نشان داده می‌شد.
   const set = (k: keyof Prize) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-    setEdit((p) => ({ ...p!, [k]: k === "value_cents" ? Number(e.target.value) * 100 : e.target.value }));
+    setEdit((p) => ({ ...p!, [k]: k === "value_cents" ? Number(e.target.value) : e.target.value }));
 
   return (
     <>
       <PageHead
         title="جایزه‌ها"
-        subtitle="هر مسابقه به یک جایزه وصل می‌شود: ویلا، خودرو یا ترکیب هر دو. تصویر شاخص در کارت‌ها و صفحهٔ اصلی استفاده می‌شود."
+        subtitle="جایزه‌ها مستقل از مسابقه تعریف می‌شوند؛ هر مسابقه می‌تواند چند جایزه با قیمت بلیط متفاوت داشته باشد. تصویر شاخص در کارت‌ها و صفحهٔ اصلی استفاده می‌شود."
         action={
           <button onClick={() => setEdit({ ...BLANK })} className="btn-primary !py-2.5 text-sm">
             جایزهٔ جدید
@@ -129,12 +132,17 @@ export default function PrizesPage() {
               <input className="field" value={edit.subtitle || ""} onChange={set("subtitle")} />
             </div>
             <div>
-              <label className="label">ارزش (به واحد اصلی، نه سنت)</label>
+              <label className="label">ارزش جایزه (ریال)</label>
               <input
                 className="field text-start" dir="ltr" type="number"
-                value={(edit.value_cents ?? 0) / 100}
+                value={edit.value_cents ?? 0}
                 onChange={set("value_cents")}
               />
+              {(edit.value_cents ?? 0) > 0 && (
+                <p className="ltr-nums mt-1 text-xs text-ink-muted">
+                  {toman(edit.value_cents ?? 0)}
+                </p>
+              )}
             </div>
             <div className="sm:col-span-2">
               <ImagePicker

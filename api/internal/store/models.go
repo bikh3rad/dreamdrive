@@ -43,21 +43,50 @@ type PrizeMedia struct {
 }
 
 type Competition struct {
+	ID   uuid.UUID `json:"id"`
+	Slug string    `json:"slug"`
+	// PrizeID و TicketPriceCents از مهاجرت 0004 بازنشسته‌اند: یک مسابقه چند
+	// جایزه دارد و قیمت روی هر جایزه است. فقط برای سازگاری با دادهٔ قدیمی
+	// خوانده می‌شوند و نباید مبنای هیچ محاسبه‌ای باشند.
+	PrizeID          *uuid.UUID `json:"prize_id,omitempty"`
+	Title            string     `json:"title"`
+	TicketPriceCents int64      `json:"ticket_price_cents,omitempty"`
+	Currency         string     `json:"currency"`
+	BoardImage       string     `json:"board_image"`
+	OpensAt          time.Time  `json:"opens_at"`
+	ClosesAt         time.Time  `json:"closes_at"`
+	Status           string     `json:"status"`
+	MaxEntriesUser   int        `json:"max_entries_user"`
+	// EntryTarget سقف تعداد حدس در کل مسابقه: با رسیدن به آن، دوره بسته و
+	// آمادهٔ داوری می‌شود. ۰ یعنی بدون سقف، هم‌قرارداد با MaxEntriesUser.
+	// بدون omitempty، وگرنه «بدون سقف» از JSON حذف می‌شود و فرم ادمین
+	// undefined می‌گیرد.
+	EntryTarget int       `json:"entry_target"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// Prizes سطوح قابل خرید این مسابقه، مرتب بر اساس sort.
+	Prizes     []CompetitionPrize `json:"prizes,omitempty"`
+	Prize      *Prize             `json:"prize,omitempty"`
+	EntryCount int64              `json:"entry_count,omitempty"`
+	// RevenueCents جمع فروش پرداخت‌شدهٔ همین مسابقه. فقط در مسیرهای مدیریتی
+	// پر می‌شود؛ omitempty باعث می‌شود در پاسخ عمومی اصلاً ظاهر نشود.
+	RevenueCents int64 `json:"revenue_cents,omitempty"`
+}
+
+// CompetitionPrize یک سطح قابل خرید: جایزه به‌علاوهٔ قیمت بلیط آن.
+//
+// برندهٔ مسابقه یک نفر است و جایزه‌اش همانی است که خودش هنگام شرکت انتخاب
+// کرده بود؛ باقی سطوح آن دوره برنده‌ای ندارند.
+type CompetitionPrize struct {
 	ID               uuid.UUID `json:"id"`
-	Slug             string    `json:"slug"`
+	CompetitionID    uuid.UUID `json:"competition_id"`
 	PrizeID          uuid.UUID `json:"prize_id"`
-	Title            string    `json:"title"`
 	TicketPriceCents int64     `json:"ticket_price_cents"`
-	Currency         string    `json:"currency"`
-	BoardImage       string    `json:"board_image"`
-	OpensAt          time.Time `json:"opens_at"`
-	ClosesAt         time.Time `json:"closes_at"`
-	Status           string    `json:"status"`
-	MaxEntriesUser   int       `json:"max_entries_user"`
+	Sort             int       `json:"sort"`
+	IsActive         bool      `json:"is_active"`
 	CreatedAt        time.Time `json:"created_at"`
 
-	Prize      *Prize `json:"prize,omitempty"`
-	EntryCount int64  `json:"entry_count,omitempty"`
+	Prize *Prize `json:"prize,omitempty"`
 }
 
 type Order struct {
@@ -75,12 +104,14 @@ type Order struct {
 }
 
 type OrderItem struct {
-	ID              uuid.UUID `json:"id"`
-	CompetitionID   uuid.UUID `json:"competition_id"`
-	CompetitionSlug string    `json:"competition_slug,omitempty"`
-	Title           string    `json:"title,omitempty"`
-	Qty             int       `json:"qty"`
-	UnitPriceCents  int64     `json:"unit_price_cents"`
+	ID                 uuid.UUID `json:"id"`
+	CompetitionID      uuid.UUID `json:"competition_id"`
+	CompetitionSlug    string    `json:"competition_slug,omitempty"`
+	CompetitionPrizeID uuid.UUID `json:"competition_prize_id"`
+	PrizeTitle         string    `json:"prize_title,omitempty"`
+	Title              string    `json:"title,omitempty"`
+	Qty                int       `json:"qty"`
+	UnitPriceCents     int64     `json:"unit_price_cents"`
 }
 
 type Entry struct {
@@ -88,12 +119,16 @@ type Entry struct {
 	UserID          uuid.UUID `json:"user_id"`
 	CompetitionID   uuid.UUID `json:"competition_id"`
 	CompetitionSlug string    `json:"competition_slug,omitempty"`
-	X               float64   `json:"x"`
-	Y               float64   `json:"y"`
-	IsFreeEntry     bool      `json:"is_free_entry"`
-	Seq             int64     `json:"seq"`
-	Hash            string    `json:"hash"`
-	CreatedAt       time.Time `json:"created_at"`
+	// CompetitionPrizeID جایزه‌ای که این بلیط برای آن خریده شده. اگر این
+	// ورودی برندهٔ دوره شود، همین جایزه اهدا می‌شود.
+	CompetitionPrizeID uuid.UUID `json:"competition_prize_id"`
+	PrizeTitle         string    `json:"prize_title,omitempty"`
+	X                  float64   `json:"x"`
+	Y                  float64   `json:"y"`
+	IsFreeEntry        bool      `json:"is_free_entry"`
+	Seq                int64     `json:"seq"`
+	Hash               string    `json:"hash"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type Result struct {
@@ -104,9 +139,14 @@ type Result struct {
 	WinnerUserID  *uuid.UUID `json:"winner_user_id"`
 	WinnerEmail   string     `json:"winner_email,omitempty"`
 	WinnerName    string     `json:"winner_name,omitempty"`
-	Distance      float64    `json:"distance"`
-	VideoURL      string     `json:"video_url"`
-	DecidedAt     time.Time  `json:"decided_at"`
+	// AwardedPrizeID جایزه‌ای که واقعاً اهدا شد — همانی که برنده انتخاب
+	// کرده بود. NULL یعنی دوره برنده نداشت. سایر جوایز همان دوره اهدا
+	// نمی‌شوند؛ این ذاتِ مدل است، نه نقص داده.
+	AwardedPrizeID *uuid.UUID `json:"awarded_prize_id,omitempty"`
+	AwardedTitle   string     `json:"awarded_title,omitempty"`
+	Distance       float64    `json:"distance"`
+	VideoURL       string     `json:"video_url"`
+	DecidedAt      time.Time  `json:"decided_at"`
 }
 
 type Page struct {

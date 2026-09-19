@@ -1,6 +1,6 @@
 "use client";
 
-import { faNum } from "@/lib/api";
+import { faNum, money } from "@/lib/api";
 
 export function roleLabel(r: string): string {
   return {
@@ -163,7 +163,8 @@ export function BarChart({ data }: { data: { day: string; cents: number }[] }) {
             style={{ height: `${Math.max(3, (d.cents / max) * 150)}px` }}
           />
           <span className="ltr-nums pointer-events-none absolute -top-7 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-ink px-1.5 py-0.5 text-[10px] text-white group-hover:block">
-            {dayLabel(d.day)} · {(d.cents / 100).toFixed(0)}
+            {/* بدون تقسیم بر ۱۰۰ — ریال زیرواحد ندارد و این عدد خودِ ریال است. */}
+            {dayLabel(d.day)} · {money(d.cents)}
           </span>
         </div>
       ))}

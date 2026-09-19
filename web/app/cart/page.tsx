@@ -17,6 +17,9 @@ export default function CartPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
+  // واحد پول از خود اقلام گرفته می‌شود، نه پیش‌فرض تابع؛ اگر مسابقه‌ای با ارز
+  // دیگری ساخته شود، جمع سبد نباید ناگهان «ریال» برچسب بخورد.
+  const currency = picks[0]?.currency || "IRR";
   const credit = user?.credit_cents ?? 0;
   const applied = useCredit ? Math.min(credit, totalCents) : 0;
   const due = totalCents - applied;
@@ -62,6 +65,12 @@ export default function CartPage() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-black text-ink">{p.competitionTitle}</p>
+                {/* جایزهٔ هر حدس باید پیش از پرداخت دیده شود: در یک مسابقه
+                    می‌توان چند حدس با جوایز مختلف داشت و بعد از ثبت، جایزهٔ
+                    یک حدس قابل تغییر نیست. */}
+                {p.prizeTitle && (
+                  <p className="truncate text-xs font-bold text-brand-700">{p.prizeTitle}</p>
+                )}
                 <p className="ltr-nums mt-0.5 text-xs text-ink-muted">
                   x {p.x.toFixed(4)} · y {p.y.toFixed(4)}
                 </p>
@@ -84,7 +93,7 @@ export default function CartPage() {
               <span className="text-ink-soft">
                 <span className="ltr-nums font-bold">{faNum(picks.length)}</span> پیشنهاد
               </span>
-              <span className="ltr-nums font-bold">{money(totalCents)}</span>
+              <span className="ltr-nums font-bold">{money(totalCents, currency)}</span>
             </div>
             {credit > 0 && (
               <div className="flex justify-between text-brand-700">
@@ -94,7 +103,7 @@ export default function CartPage() {
                   <IconWallet className="h-4 w-4" />
                   اعتبار کیف پول
                 </label>
-                <span className="ltr-nums font-bold">− {money(applied)}</span>
+                <span className="ltr-nums font-bold">− {money(applied, currency)}</span>
               </div>
             )}
           </div>
@@ -103,7 +112,7 @@ export default function CartPage() {
 
           <div className="flex items-baseline justify-between">
             <span className="font-black text-ink">قابل پرداخت</span>
-            <span className="ltr-nums text-xl font-black text-brand-600">{money(due)}</span>
+            <span className="ltr-nums text-xl font-black text-brand-600">{money(due, currency)}</span>
           </div>
 
           {err && <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{err}</p>}
