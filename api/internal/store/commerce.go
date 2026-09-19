@@ -1,9 +1,11 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -76,6 +78,40 @@ func (s *Store) Checkout(ctx context.Context, userID uuid.UUID, lines []CartLine
 	if user.IsInsider {
 		return res, ErrInsider
 	}
+
+	// ترتیب قفل‌گرفتن باید قطعی باشد، وگرنه دو سبدِ همزمان با دو مسابقهٔ
+	// مشترک و ترتیب وارونه (A,B در برابر B,A) روی سطرهای competitions
+	// بن‌بست می‌سازند — و ترتیب اقلام را خودِ مشتری در JSON تعیین می‌کند،
+	// پس این بن‌بست از بیرون قابل ایجاد است. Postgres یکی را با 40P01
+	// می‌کشد و متن خام خطا به کاربر می‌رسد.
+	//
+	// شناسهٔ مسابقه فقط از روی سطح جایزه به دست می‌آید، پس اول بدون قفل
+	// آن را می‌خوانیم و سپس بر همان مرتب می‌کنیم. این خواندنِ مقدماتی مبنای
+	// هیچ تصمیمی نیست؛ حلقهٔ اصلی دوباره و این بار با قفل می‌خواند.
+	order := make(map[uuid.UUID]uuid.UUID, len(lines))
+	for _, line := range lines {
+		if line.CompetitionPrizeID == uuid.Nil {
+			continue
+		}
+		var compID uuid.UUID
+		if err := tx.QueryRow(ctx,
+			`SELECT competition_id FROM competition_prizes WHERE id=$1`,
+			line.CompetitionPrizeID).Scan(&compID); err != nil {
+			return res, norm(err)
+		}
+		order[line.CompetitionPrizeID] = compID
+	}
+	sorted := make([]CartLine, len(lines))
+	copy(sorted, lines)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a, b := order[sorted[i].CompetitionPrizeID], order[sorted[j].CompetitionPrizeID]
+		if a == b {
+			// هم‌مسابقه: ترتیب ثانویه تا مرتب‌سازی قطعی بماند.
+			return bytes.Compare(sorted[i].CompetitionPrizeID[:], sorted[j].CompetitionPrizeID[:]) < 0
+		}
+		return bytes.Compare(a[:], b[:]) < 0
+	})
+	lines = sorted
 
 	var total int64
 	type prepared struct {
