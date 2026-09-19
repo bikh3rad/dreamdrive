@@ -70,7 +70,14 @@ export interface Competition {
   prizes?: CompetitionPrize[];
   /** جایزهٔ شاخص برای تصویر و تیتر کارت؛ گران‌ترین سطح فعال. */
   prize?: Prize;
+  /** حدس‌های قطعی (رایگان یا پرداخت‌شده) — همان عددی که دوره را می‌بندد. */
   entry_count?: number;
+  /**
+   * صندلی‌های اشغال‌شده، شامل سفارش pending. گیتِ فروش سرور با همین می‌سنجد،
+   * پس برای «آیا خرید تازه پذیرفته می‌شود؟» باید این خوانده شود نه
+   * entry_count. فقط در پاسخ یک مسابقهٔ تکی می‌آید.
+   */
+  reserved_count?: number;
   /** جمع فروش پرداخت‌شدهٔ همین مسابقه. فقط در پاسخ‌های مدیریتی می‌آید. */
   revenue_cents?: number;
   created_at?: string;
@@ -405,6 +412,9 @@ export const api = {
       request<void>(`/api/admin/prizes/${id}`, { method: "DELETE" }),
 
     competitions: () => request<{ competitions: Competition[] }>("/api/admin/competitions"),
+    // دوره‌هایی که شرط بسته‌شدنشان رسیده ولی منتظر تعهد داوران مانده‌اند.
+    stuckCompetitions: () =>
+      request<{ competitions: Competition[] }>("/api/admin/competitions/stuck"),
     createCompetition: (b: any) =>
       request<Competition>("/api/admin/competitions", { method: "POST", body: JSON.stringify(b) }),
     updateCompetition: (id: string, b: any) =>

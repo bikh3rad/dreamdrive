@@ -128,6 +128,10 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Delete("/media/{id}", s.adminDeleteMedia)
 
 				r.Get("/competitions", s.adminListCompetitions)
+				// پیش از {id} ثبت شده و عمداً یک قطعهٔ ثابت است، نه
+				// زیرمسیرِ یک شناسه؛ این فهرست به هیچ مسابقهٔ مشخصی تعلق
+				// ندارد.
+				r.Get("/competitions/stuck", s.adminStuckCompetitions)
 				r.Post("/competitions", s.adminCreateCompetition)
 				r.Put("/competitions/{id}", s.adminUpdateCompetition)
 				r.Post("/competitions/{id}/status", s.adminSetStatus)

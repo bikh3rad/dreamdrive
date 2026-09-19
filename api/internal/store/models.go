@@ -67,7 +67,18 @@ type Competition struct {
 	// Prizes سطوح قابل خرید این مسابقه، مرتب بر اساس sort.
 	Prizes     []CompetitionPrize `json:"prizes,omitempty"`
 	Prize      *Prize             `json:"prize,omitempty"`
-	EntryCount int64              `json:"entry_count,omitempty"`
+	// EntryCount حدس‌های *قطعی* (رایگان یا پرداخت‌شده) — همان عددی که دوره را
+	// می‌بندد. بدون omitempty: صفر یک مقدار معتبر است و حذفش از JSON آن را از
+	// «شمارش انجام نشد» غیرقابل تشخیص می‌کرد.
+	EntryCount int64 `json:"entry_count"`
+	// ReservedCount صندلی‌های اشغال‌شده، شامل سفارش pending. گیتِ فروش سرور با
+	// همین می‌سنجد، پس هر رابطی که می‌خواهد بداند «آیا خرید تازه پذیرفته
+	// می‌شود؟» باید این را بخواند نه EntryCount — وگرنه با چند سبدِ باز روی
+	// سقف، دکمهٔ خرید فعال می‌ماند و هر تلاش با ۴۰۹ برمی‌گردد.
+	//
+	// فقط در CompetitionBySlug پر می‌شود؛ omitempty دارد تا فهرست‌ها صفرِ
+	// بی‌معنی نفرستند.
+	ReservedCount int64 `json:"reserved_count,omitempty"`
 	// RevenueCents جمع فروش پرداخت‌شدهٔ همین مسابقه. فقط در مسیرهای مدیریتی
 	// پر می‌شود؛ omitempty باعث می‌شود در پاسخ عمومی اصلاً ظاهر نشود.
 	RevenueCents int64 `json:"revenue_cents,omitempty"`

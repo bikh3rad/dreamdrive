@@ -38,7 +38,13 @@ func main() {
 		{"judge2@panel.example", "Referee L. Bergström", "SE", auth.RoleJudge},
 		{"judge3@panel.example", "Referee D. Okafor", "IE", auth.RoleJudge},
 		// حساب ناظر جداست و هیچ نقش مدیریتی ندارد؛ استقلالش همین است.
+		// auditor عمداً در AdminRoles نیست (auth.go) و مسیرهای /api/auditor/*
+		// با RequireExactRole گیت شده‌اند، یعنی superadmin هم راه ندارد.
 		{"auditor@panel.example", "Auditor — C. Haldane", "IE", auth.RoleAuditor},
+		// ناظر داخلی. داشتن بیش از یک ناظر عمدی است: قفل تسویه فقط با رسیدگی
+		// ناظر باز می‌شود، و با تک‌حساب، در دسترس نبودن همان یک نفر یعنی هیچ
+		// مسابقه‌ای قابل تسویه نیست.
+		{"nazer@besooyeroya.com", "نگار — ناظر مستقل", "IR", auth.RoleAuditor},
 		{"james@example.com", "James W.", "CA", auth.RoleUser},
 		{"priya@example.com", "Priya S.", "CA", auth.RoleUser},
 		{"marc@example.com", "Marc L.", "CA", auth.RoleUser},
@@ -368,11 +374,10 @@ func main() {
 			"enabled": true,
 			"text":    "دورهٔ این هفته باز است — تا یکشنبه نیمه‌شب نشانه بگیر.",
 		},
-		"packs": []any{
-			map[string]any{"entries": 1, "price_cents": 300, "label": "شروع", "discount": 0},
-			map[string]any{"entries": 5, "price_cents": 1200, "label": "روزمره", "discount": 20, "popular": true},
-			map[string]any{"entries": 20, "price_cents": 4000, "label": "بازیگر بزرگ", "discount": 33},
-		},
+		// «packs» عمداً دیگر seed نمی‌شود. هیچ مصرف‌کننده‌ای نداشت — Checkout
+		// منطق بسته و تخفیف حجمی ندارد — و مقادیرش هم از دورهٔ یورو مانده
+		// بود (۳۰۰ = سه یورو، که به‌عنوان ریال عملاً رایگان است). قیمت واقعی
+		// از سطوح جایزهٔ هر مسابقه می‌آید.
 	}
 	for k, v := range settings {
 		if err := st.SetSetting(ctx, k, v); err != nil {

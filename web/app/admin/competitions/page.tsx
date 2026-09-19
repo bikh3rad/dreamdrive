@@ -33,7 +33,17 @@ export default function AdminCompetitionsPage() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = () => api.admin.competitions().then((r) => setComps(r.competitions || [])).catch(() => {});
+  // دوره‌های «باز ولی پر»: شرط بسته‌شدنشان رسیده ولی چون هیچ داوری تعهد ثبت
+  // نکرده، جارو عمداً نمی‌بنددشان. در فهرست اصلی از یک دورهٔ سالمِ باز قابل
+  // تشخیص نیستند، پس جدا نشان داده می‌شوند.
+  const [stuck, setStuck] = useState<Competition[]>([]);
+
+  const load = () =>
+    Promise.all([
+      api.admin.competitions().then((r) => setComps(r.competitions || [])),
+      // خطایش کشنده نیست؛ نبودِ هشدار بهتر از صفحهٔ خالیِ مسابقه‌هاست.
+      api.admin.stuckCompetitions().then((r) => setStuck(r.competitions || [])).catch(() => {}),
+    ]).catch(() => {});
   useEffect(() => {
     void load();
     api.admin.prizes().then((r) => setPrizes(r.prizes || [])).catch(() => {});
@@ -114,6 +124,22 @@ export default function AdminCompetitionsPage() {
         setBusy(false);
         return;
       }
+      // همان تلهٔ entry_target برای سقف هر کاربر هم هست، ولی نتیجه‌اش بدتر
+      // است: ۰ یعنی «بدون محدودیت»، پس یک فیلدِ تصادفاً پاک‌شده سقف خرید هر
+      // کاربر را برمی‌دارد و یک نفر می‌تواند کل استخر را بخرد.
+      const rawPerUser = String(edit.max_entries_user ?? "").trim();
+      if (rawPerUser === "") {
+        setErr("سقف هر کاربر را وارد کنید؛ برای «بدون محدودیت» صریحاً ۰ بنویسید.");
+        setBusy(false);
+        return;
+      }
+      const perUser = Number(rawPerUser);
+      if (isNaN(perUser) || perUser < 0) {
+        setErr("سقف هر کاربر باید عددی نامنفی باشد (۰ یعنی بدون محدودیت).");
+        setBusy(false);
+        return;
+      }
+
       // پایین آوردن سقف زیر تعداد فعلی، دوره را در جارویِ بعدی می‌بندد.
       // این کار گاهی عمدی است، ولی نباید بی‌خبر اتفاق بیفتد.
       const already = edit.entry_count ?? 0;
@@ -137,7 +163,7 @@ export default function AdminCompetitionsPage() {
         board_image: edit.board_image || "",
         opens_at: opens.toISOString(),
         closes_at: closes.toISOString(),
-        max_entries_user: Number(edit.max_entries_user),
+        max_entries_user: perUser,
         entry_target: target,
         prizes: levels.map((l: any, i: number) => ({
           prize_id: l.prize_id,
@@ -196,6 +222,31 @@ export default function AdminCompetitionsPage() {
           </button>
         }
       />
+
+      {stuck.length > 0 && (
+        <div className="mb-5 rounded-2xl border border-amber-300 bg-amber-50 p-5">
+          <h3 className="text-sm font-black text-amber-900">
+            منتظر تعهد داوران
+          </h3>
+          <p className="mt-1 text-xs leading-6 text-amber-900/80">
+            این دوره‌ها به سقف حدس یا به زمان پایان رسیده‌اند، ولی چون هیچ داوری
+            هنوز هشِ تعهدش را ثبت نکرده، عمداً بسته نمی‌شوند: دوره‌ای که پیش از
+            ثبت تعهدها بسته شود دیگر نه تعهد می‌پذیرد و نه قابل تسویه است. تا
+            ثبت تعهد، خرید تازه هم پذیرفته نمی‌شود.
+          </p>
+          <ul className="mt-3 space-y-1 text-xs">
+            {stuck.map((c) => (
+              <li key={c.id} className="flex items-center justify-between gap-3">
+                <span className="font-bold text-amber-900">{c.prize?.title || c.title}</span>
+                <span className="ltr-nums text-amber-900/70">
+                  {faNum((c.entry_count ?? 0).toLocaleString("en-US"))}
+                  {c.entry_target > 0 && ` / ${faNum(c.entry_target.toLocaleString("en-US"))}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <Table head={["عنوان", "وضعیت", "قیمت", "بازه", "سقف کاربر", "شرکت‌کننده", "درآمد", "اقدام"]}>
         {comps.length === 0 && <Empty>هنوز مسابقه‌ای ساخته نشده است.</Empty>}
@@ -313,7 +364,7 @@ export default function AdminCompetitionsPage() {
             </div>
             <div>
               <label className="label">سقف پیشنهاد هر کاربر</label>
-              <input className="field text-start" dir="ltr" type="number" value={edit.max_entries_user} onChange={set("max_entries_user")} />
+              <input className="field text-start" dir="ltr" type="number" min={0} value={edit.max_entries_user} onChange={set("max_entries_user")} />
               <p className="mt-1.5 text-xs text-ink-muted">
                 محدودیت هر حساب، نه کل دوره.
               </p>

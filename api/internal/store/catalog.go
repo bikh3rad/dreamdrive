@@ -377,9 +377,15 @@ func (s *Store) CompetitionBySlug(ctx context.Context, slug string) (Competition
 		c.Prizes = lv
 		c.Prize = headlinePrize(lv)
 	}
+	// هر دو شمارش در یک رفت‌وبرگشت. صفحهٔ بازی هر دو را لازم دارد و معنایشان
+	// یکی نیست: EntryCount پیشرفتِ دوره را نشان می‌دهد (و باید با عددی که
+	// دوره را می‌بندد یکی باشد)، ReservedCount تعیین می‌کند آیا خرید تازه
+	// اصلاً پذیرفته می‌شود.
 	if err := s.DB.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s`, fmt.Sprintf(countableEntries, "$1")),
-		c.ID).Scan(&c.EntryCount); err != nil {
+		fmt.Sprintf(`SELECT %s, %s`,
+			fmt.Sprintf(countableEntries, "$1"),
+			fmt.Sprintf(reservedEntries, "$1")),
+		c.ID).Scan(&c.EntryCount, &c.ReservedCount); err != nil {
 		slog.Error("competitionEntryCount", "competition", c.ID, "error", err)
 	}
 	return c, nil
@@ -587,7 +593,20 @@ func (s *Store) StuckCompetitions(ctx context.Context) ([]Competition, error) {
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// سطوح جایزه باید ضمیمه شوند وگرنه Prize خالی می‌ماند و رابط ادمین به
+	// c.title داخلی برمی‌گردد — یعنی همان دوره در هشدارِ بالای صفحه یک نام و
+	// در جدولِ پایینِ همان صفحه نامی دیگر می‌گیرد و ادمین نمی‌فهمد یکی‌اند.
+	// includeRetired معادل true است: این فهرست فقط برای ادمین است.
+	for i := range out {
+		if lv, err := s.CompetitionPrizes(ctx, out[i].ID, false); err == nil {
+			out[i].Prizes = lv
+			out[i].Prize = headlinePrize(lv)
+		}
+	}
+	return out, nil
 }
 
 // دو پرسشِ متفاوت دربارهٔ «چند حدس در این دوره هست؟» وجود دارد و یکی‌گرفتنشان

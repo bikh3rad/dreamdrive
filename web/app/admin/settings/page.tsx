@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, money, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { PageHead } from "@/components/admin/ui";
 import { Logo } from "@/components/icons";
 import { ImagePicker } from "@/components/admin/ImagePicker";
@@ -19,12 +20,11 @@ const DEFAULTS: S = {
   hero_image: "",
   near_miss_threshold: 0.05,
   near_miss_max_percent: 100,
-  // مبالغ به ریال‌اند (ریال زیرواحد ندارد)، نه سنت.
-  packs: [
-    { entries: 1, price_cents: 5_000_000 },
-    { entries: 5, price_cents: 20_000_000 },
-    { entries: 20, price_cents: 70_000_000 },
-  ],
+  // «بسته‌های پیشنهاد» حذف شد. این تنظیم هیچ مصرف‌کننده‌ای نداشت: Checkout هر
+  // پیشنهاد را با قیمت کاملِ سطح جایزه حساب می‌کند و منطق بسته ندارد. یعنی
+  // ادمین می‌توانست بسته‌ها را ویرایش و با موفقیت ذخیره کند و هیچ‌جای سایت
+  // تغییری نبیند — کنترلی که کار می‌کند ولی اثر ندارد، از نبودش بدتر است.
+  // قیمت واقعی از سطوح جایزهٔ هر مسابقه می‌آید.
   min_age: 18,
   maintenance: false,
 };
@@ -57,10 +57,6 @@ export default function SettingsPage() {
       setMsg({ kind: "err", text: e instanceof ApiError ? e.message : "ذخیره ناموفق بود." });
     } finally { setBusy(false); }
   };
-
-  const packs: { entries: number; price_cents: number }[] = s.packs || [];
-  const setPack = (i: number, k: string, v: number) =>
-    set("packs", packs.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
 
   return (
     <>
@@ -138,40 +134,13 @@ export default function SettingsPage() {
 
           {tab === "commerce" && (
             <div className="space-y-6">
-              <div>
-                <p className="label">بسته‌های پیشنهاد</p>
-                <div className="space-y-3">
-                  {packs.map((p, i) => (
-                    <div key={i} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-                      <div>
-                        <label className="mb-1 block text-xs text-ink-muted">تعداد پیشنهاد</label>
-                        <input
-                          className="field text-start" dir="ltr" type="number" value={p.entries}
-                          onChange={(e) => setPack(i, "entries", Number(e.target.value))}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-ink-muted">قیمت (ریال)</label>
-                        <input
-                          className="field text-start" dir="ltr" type="number" value={p.price_cents}
-                          onChange={(e) => setPack(i, "price_cents", Number(e.target.value))}
-                        />
-                      </div>
-                      <button
-                        onClick={() => set("packs", packs.filter((_, j) => j !== i))}
-                        className="self-end rounded-xl px-3 py-3 text-xs font-bold text-red-600 hover:bg-red-50"
-                      >
-                        حذف
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={() => set("packs", [...packs, { entries: 1, price_cents: 5_000_000 }])}
-                  className="btn-ghost mt-3 !py-2 !px-4 text-xs"
-                >
-                  افزودن بسته
-                </button>
+              <div className="rounded-xl bg-canvas-alt p-4 text-xs leading-6 text-ink-muted">
+                قیمت هر پیشنهاد اینجا تعیین نمی‌شود؛ از سطوح جایزهٔ هر مسابقه
+                می‌آید. برای تغییر قیمت به{" "}
+                <Link href="/admin/competitions" className="font-bold text-brand-600 hover:underline">
+                  مسابقه‌ها
+                </Link>{" "}
+                برو و سطح جایزهٔ موردنظر را ویرایش کن.
               </div>
 
               <div className="border-t border-ink/[.07] pt-6">
@@ -282,18 +251,6 @@ export default function SettingsPage() {
             >
               همین حالا بازی کن
             </button>
-            <div className="mt-4 flex gap-2">
-              {packs.slice(0, 3).map((p, i) => (
-                <div
-                  key={i}
-                  className="ltr-nums flex-1 rounded-xl bg-white p-3 text-center text-[11px]"
-                  style={{ color: s.color_ink }}
-                >
-                  <p className="font-black">{money(p.price_cents)}</p>
-                  <p className="mt-0.5 opacity-60">{p.entries}×</p>
-                </div>
-              ))}
-            </div>
           </div>
         </aside>
       </div>

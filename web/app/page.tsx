@@ -20,13 +20,15 @@ const STEPS = [
   { n: "۴", t: "منتظر رأی داوران بمان", d: "هیئت داوران مستقل پیش از بسته‌شدن، نقطهٔ خود را قفل می‌کند و پس از آن آشکار می‌شود." },
 ];
 
-// مبالغ به ریال — ریال زیرواحد ندارد، پس این اعداد خودِ ریال‌اند. اینها
-// نمونهٔ نمایشی‌اند؛ قیمت واقعی هر پیشنهاد از سطح جایزهٔ همان مسابقه می‌آید.
-const PACKS = [
-  { n: 1, price: 5_000_000, label: "تک پیشنهاد", note: "برای امتحان کردن" },
-  { n: 5, price: 20_000_000, label: "بستهٔ پنج‌تایی", note: "محبوب‌ترین", best: true },
-  { n: 20, price: 70_000_000, label: "بستهٔ بیست‌تایی", note: "بهترین ارزش" },
-];
+// بسته‌های ثابت («۵ پیشنهاد با ۲۰٪ تخفیف») از اینجا حذف شدند. دو دلیل:
+//
+//   ۱) تخفیفِ حجمی وجود خارجی نداشت. Checkout هر پیشنهاد را با قیمت کاملِ
+//      سطح جایزه حساب می‌کند و هیچ منطق بسته‌ای ندارد؛ یعنی صفحهٔ اصلی
+//      قیمتی را تبلیغ می‌کرد که سبد خرید هرگز نمی‌داد.
+//   ۲) قیمت‌ها ثابت و دست‌نویس بودند، در حالی که قیمت واقعی از سطح جایزهٔ
+//      هر مسابقه می‌آید و ادمین می‌تواند تغییرش دهد.
+//
+// حالا همان مسابقهٔ شاخص با قیمت‌های واقعی‌اش نمایش داده می‌شود.
 
 const TRUST = [
   { icon: IconScale, t: "مهارت، نه شانس", d: "برنده بر اساس نزدیکی به رأی هیئت داوران انتخاب می‌شود. هیچ قرعه‌کشی‌ای در کار نیست." },
@@ -51,6 +53,10 @@ export default function HomePage() {
   }, []);
 
   const featured = (comps || [])[0];
+  // فقط سطوح فعال: سطح غیرفعال قابل خرید نیست و نمایش قیمتش یعنی تبلیغ چیزی
+  // که سبد خرید رد می‌کند. شرطِ featured لازم است — activeLevels آرگومانش را
+  // dereference می‌کند و با undefined خطا می‌دهد.
+  const featuredLevels = featured ? activeLevels(featured) : [];
 
   return (
     <>
@@ -127,7 +133,7 @@ export default function HomePage() {
                   </div>
                   <div className="text-end">
                     <p className="text-xs text-ink-muted">
-                      هر پیشنهاد {activeLevels(featured).length > 1 && "از"}
+                      هر پیشنهاد {featuredLevels.length > 1 && "از"}
                     </p>
                     <p className="ltr-nums mt-0.5 font-black text-brand-600">
                       {money(startingPrice(featured) ?? 0, featured.currency)}
@@ -144,7 +150,11 @@ export default function HomePage() {
                 <span className="ltr-nums">
                   {faNum((featured.entry_count ?? 0).toLocaleString("en-US"))}
                 </span>
-                نفر شرکت کرده‌اند
+                {/* «حدس»، نه «نفر». entry_count تعداد ورودی است و هر کاربر
+                    می‌تواند تا max_entries_user حدس ثبت کند (پیش‌فرض ۱۰۰)،
+                    پس خواندنش به‌عنوان تعداد شرکت‌کننده تا ۱۰۰ برابر
+                    بیش‌نمایی می‌کرد. */}
+                حدس ثبت شده
               </div>
             </div>
           )}
@@ -195,42 +205,29 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ---------- بسته‌های پیشنهاد ---------- */}
+      {/* ---------- قیمت پیشنهاد ---------- */}
       <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
         <div className="mx-auto max-w-2xl text-center">
           <p className="eyebrow">قیمت‌گذاری</p>
-          <h2 className="h-section mt-2">بسته‌های پیشنهاد</h2>
+          <h2 className="h-section mt-2">هزینهٔ هر پیشنهاد</h2>
           <p className="mt-3 text-ink-muted">
-            هر پیشنهاد یک نقطه روی تصویر است. هرچه نقطه‌های بیشتری ثبت کنی، شانس
-            نزدیک‌شدن به رأی داوران بیشتر می‌شود.
+            هر پیشنهاد یک نقطه روی تصویر است و قیمتش را جایزه‌ای تعیین می‌کند
+            که انتخاب کرده‌ای. همه در یک رقابت‌اند و شانس همه برابر است؛ انتخاب
+            جایزه فقط تعیین می‌کند اگر برندهٔ دوره شدی چه تحویل می‌گیری.
           </p>
         </div>
 
         <div className="mx-auto mt-10 grid max-w-4xl gap-6 md:grid-cols-3">
-          {PACKS.map((p) => (
-            <div
-              key={p.n}
-              className={`card relative p-7 text-center ${
-                p.best ? "ring-2 ring-brand-500 md:-translate-y-3" : ""
-              }`}
-            >
-              {p.best && (
-                <span className="chip absolute -top-3 start-1/2 -translate-x-1/2 bg-brand-500 text-ink">
-                  {p.note}
-                </span>
-              )}
-              <p className="text-sm font-bold text-ink-muted">{p.label}</p>
+          {featuredLevels.map((l) => (
+            <div key={l.id} className="card relative p-7 text-center">
+              <p className="text-sm font-bold text-ink-muted">
+                {l.prize?.title || "جایزه"}
+              </p>
               <p className="ltr-nums mt-3 text-4xl font-black text-ink">
-                {money(p.price)}
+                {money(l.ticket_price_cents, featured?.currency)}
               </p>
               <p className="mt-2 text-sm text-ink-muted">
-                <span className="ltr-nums font-bold text-ink">{faNum(p.n)}</span> پیشنهاد
-                {p.n > 1 && (
-                  <>
-                    {" · "}
-                    <span className="ltr-nums">{money(Math.round(p.price / p.n))}</span> هرکدام
-                  </>
-                )}
+                {l.prize?.subtitle || "برای هر پیشنهاد"}
               </p>
               <ul className="mt-6 space-y-2.5 text-start text-sm text-ink-soft">
                 {["اعتبار نزدیک‌ترین حدس", "اعلان ایمیلی نتیجه", "تاریخچهٔ کامل پیشنهادها"].map((f) => (
@@ -242,12 +239,17 @@ export default function HomePage() {
               </ul>
               <Link
                 href={featured ? `/play/${featured.slug}` : "/competitions"}
-                className={`${p.best ? "btn-primary" : "btn-dark"} mt-7 w-full !py-2.5 text-sm`}
+                className="btn-dark mt-7 w-full !py-2.5 text-sm"
               >
-                انتخاب بسته
+                ثبت پیشنهاد
               </Link>
             </div>
           ))}
+          {featuredLevels.length === 0 && (
+            <p className="card p-7 text-center text-sm text-ink-muted md:col-span-3">
+              در حال حاضر مسابقهٔ بازی برای نمایش قیمت وجود ندارد.
+            </p>
+          )}
         </div>
 
         <p className="mt-8 text-center text-sm text-ink-muted">

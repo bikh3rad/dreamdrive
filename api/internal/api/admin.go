@@ -170,6 +170,21 @@ func (s *Server) adminListCompetitions(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"competitions": comps})
 }
 
+// adminStuckCompetitions دوره‌هایی که شرط بسته‌شدنشان رسیده ولی هیچ داوری
+// تعهد ثبت نکرده، پس عمداً باز مانده‌اند.
+//
+// بدون این مسیر، آن انتظار نامرئی بود: در فهرست ادمین چنین دوره‌ای دقیقاً مثل
+// یک دورهٔ سالمِ باز دیده می‌شود، در حالی که در عمل نه حدس تازه‌ای می‌پذیرد
+// (ظرفیت پر است) و نه پیش می‌رود. تنها راه خروج، ثبت تعهد داوران است.
+func (s *Server) adminStuckCompetitions(w http.ResponseWriter, r *http.Request) {
+	comps, err := s.St.StuckCompetitions(r.Context())
+	if err != nil {
+		httpx.Fail(w, 500, "could not load competitions")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"competitions": comps})
+}
+
 func (s *Server) adminCreateCompetition(w http.ResponseWriter, r *http.Request) {
 	var in store.CompetitionInput
 	if err := httpx.Decode(r, &in); err != nil {
@@ -302,8 +317,14 @@ var settingsAllowed = map[string]bool{
 	"site_name": true, "tagline": true, "support_email": true,
 	"free_entry_address": true, "color_brand": true, "color_ink": true,
 	"color_canvas": true, "hero_image": true, "near_miss_threshold": true,
-	"near_miss_max_percent": true, "packs": true, "min_age": true,
+	"near_miss_max_percent": true, "min_age": true,
 	"maintenance": true,
+	// packs دیگر هیچ مصرف‌کننده‌ای ندارد (ویرایشگرش از پنل حذف شد، و Checkout
+	// هیچ‌وقت منطق بسته نداشت)، ولی عمداً مجاز می‌ماند: پایگاه داده‌های موجود
+	// این کلید را دارند، GET /api/settings برمی‌گرداندش و فرم پنل کلِ شیء
+	// دریافتی را دوباره POST می‌کند. حذفش از این فهرست یعنی ذخیرهٔ تنظیمات
+	// روی هر نصبِ موجود با «unknown setting: packs» شکست می‌خورد.
+	"packs": true,
 }
 
 func (s *Server) adminSetSettings(w http.ResponseWriter, r *http.Request) {

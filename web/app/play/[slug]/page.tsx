@@ -78,6 +78,22 @@ export default function PlayPage({ params }: { params: { slug: string } }) {
 
   const closed = comp.status !== "open";
 
+  // ظرفیت دوره پر شده ولی هنوز بسته نشده. این حالت واقعی است و گذرا نیست:
+  // بستنِ خودکار به ثبت تعهد داوران گره خورده، پس دوره می‌تواند مدتی «باز
+  // ولی پر» بماند. بدون این شرط، دکمه‌ها فعال می‌ماندند و هر خرید با خطای
+  // ۴۰۹ برمی‌گشت — یعنی کاربر نقطه انتخاب می‌کرد، پرداخت را شروع می‌کرد و
+  // بعد می‌فهمید جایی نبوده.
+  // reserved_count و نه entry_count: گیتِ فروش سرور سفارش pending را هم
+  // می‌شمارد. با چند سبدِ پرداخت‌نشده روی سقف، entry_count هنوز کمتر از هدف
+  // است ولی Checkout با ErrTargetReached رد می‌کند — یعنی دقیقاً همان ۴۰۹ای
+  // که این شرط قرار بود جلویش را بگیرد. ?? به entry_count برمی‌گردد چون
+  // فهرست‌ها reserved_count نمی‌فرستند.
+  const full =
+    !closed &&
+    comp.entry_target > 0 &&
+    (comp.reserved_count ?? comp.entry_count ?? 0) >= comp.entry_target;
+  const locked = closed || full;
+
   const addToCart = () => {
     if (!user) return router.push(`/login?next=/play/${comp.slug}`);
     if (!level) {
@@ -149,8 +165,16 @@ export default function PlayPage({ params }: { params: { slug: string } }) {
             markers={marks}
             onAdd={(m) => setMarks((p) => [...p, m])}
             onRemove={(i) => setMarks((p) => p.filter((_, j) => j !== i))}
-            readOnly={closed}
+            readOnly={locked}
           />
+
+          {full && (
+            <div className="card mt-5 flex items-center gap-3 bg-canvas-alt p-5 text-sm text-ink-soft">
+              <IconInfo className="h-5 w-5 shrink-0 text-ink-muted" />
+              ظرفیت این دوره تکمیل شده و پیشنهاد تازه‌ای پذیرفته نمی‌شود؛
+              نتیجه پس از رأی داوران اعلام می‌شود.
+            </div>
+          )}
 
           {closed && (
             <div className="card mt-5 flex items-center gap-3 bg-canvas-alt p-5 text-sm text-ink-soft">
@@ -181,7 +205,7 @@ export default function PlayPage({ params }: { params: { slug: string } }) {
                     key={l.id}
                     type="button"
                     onClick={() => setLevelId(l.id)}
-                    disabled={closed}
+                    disabled={locked}
                     className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-start transition ${
                       on
                         ? "border-brand-500 bg-brand-50"
@@ -229,15 +253,15 @@ export default function PlayPage({ params }: { params: { slug: string } }) {
 
             <button
               onClick={addToCart}
-              disabled={closed || marks.length === 0 || busy || !level}
+              disabled={locked || marks.length === 0 || busy || !level}
               className="btn-primary mt-5 w-full"
             >
-              افزودن به سبد
+              {full ? "ظرفیت تکمیل است" : "افزودن به سبد"}
             </button>
 
             <button
               onClick={freeEntry}
-              disabled={closed || busy || !level}
+              disabled={locked || busy || !level}
               className="btn-ghost mt-2 w-full !py-2.5 text-sm"
             >
               <IconGift className="h-4 w-4" />
