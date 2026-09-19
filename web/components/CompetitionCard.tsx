@@ -42,9 +42,11 @@ export function CompetitionCard({ c }: { c: Competition }) {
             </span>
             هر پیشنهاد
           </span>
-          {/* entry_count با omitempty می‌آید، پس دورهٔ بدون حدس اصلاً فیلد را
-              ندارد. بدون شرط دوم، نوار ظرفیتِ پایین بدون هیچ برچسبی نمایش
-              داده می‌شد و شبیه خرابی رندر دیده می‌شد. */}
+          {/* entry_count دیگر omitempty ندارد، پس از API همیشه می‌آید (صفر هم
+              مقدار معتبری است). شرط باقی می‌ماند چون این کامپوننت دادهٔ
+              fallback و دادهٔ فهرست‌های دیگر را هم رندر می‌کند که این فیلد را
+              ندارند؛ بدون آن، نوار ظرفیتِ پایین بی‌برچسب و شبیه خرابی رندر
+              دیده می‌شد. */}
           {(typeof c.entry_count === "number" || c.entry_target > 0) && (
             <span className="flex items-center gap-1.5">
               <IconCalendar className="h-4 w-4" />
